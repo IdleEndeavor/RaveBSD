@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rave Book Search, Backend</title>
+    <link rel="stylesheet" href="css/index.css">
+    <script src="js/common.js"></script>
+    <script src="js/verify.js"></script>
+    <meta name="description" content="RaveBSD settings, statistics and source list">
+    <meta name="robots" content="noindex, nofollow">
+    <link href="img/favicon.png" rel="shortcut icon" type="image/png">
+</head>
+<body>
+
+    <div class="sources-container">
+
+        <a href="javascript:history.back()" class="sources-back">&#8592; Back to Search</a>
+
+        <h1 class="sources-title">Backend</h1>
+        <p class="sources-intro">
+            These are third-party sites. We cannot vouch for their safety or legality, so use them at your own risk.<br>
+            Found a broken link? Report it on <a href="https://github.com/IdleEndeavor/RaveBSD" target="_blank" rel="noopener">GitHub</a>.
+        </p>
+
+        <!-- Local stats, recorded and stored by the RaveBSD server, never sent anywhere else -->
+        <section class="source-section stats-section">
+            <h2>Your Local Stats</h2>
+            <p class="source-note">
+                Stored only locally, on the machine running RaveBSD. "Est. MB downloaded" is an
+                estimate based on files opened, RaveBSD can't confirm a download actually finished.
+                You can switch recording off under Preferences below.
+            </p>
+            <div class="stats-grid" id="stats-grid"></div>
+            <div class="stats-formats" id="stats-formats"></div>
+            <button class="stats-reset" id="stats-reset">Reset stats</button>
+        </section>
+
+        <!-- Shadow Libraries -->
+        <section class="source-section">
+            <h2>Shadow Libraries <span class="source-count">12</span></h2>
+            <p class="source-note">
+                Large collections of mixed legal status. Their availability changes often.
+            </p>
+            <ul class="source-list">
+                <li><a href="https://annas-archive.gl"  target="_blank" rel="noopener noreferrer">annas-archive.gl</a></li>
+                <li><a href="https://annas-archive.pk"  target="_blank" rel="noopener noreferrer">annas-archive.pk</a></li>
+                <li><a href="https://annas-archive.gd"  target="_blank" rel="noopener noreferrer">annas-archive.gd</a></li>
+                <li><a href="https://libgen.is"         target="_blank" rel="noopener noreferrer">libgen.is</a></li>
+                <li><a href="https://libgen.la"         target="_blank" rel="noopener noreferrer">libgen.la</a></li>
+                <li><a href="https://libgen.gl"         target="_blank" rel="noopener noreferrer">libgen.gl</a></li>
+                <li><a href="https://libgen.vg"         target="_blank" rel="noopener noreferrer">libgen.vg</a></li>
+                <li><a href="https://libgen.bz"         target="_blank" rel="noopener noreferrer">libgen.bz</a></li>
+                <li><a href="https://z-lib.gd"          target="_blank" rel="noopener noreferrer">z-lib.gd</a></li>
+                <li><a href="https://liber3.eth.limo"   target="_blank" rel="noopener noreferrer">liber3.eth.limo</a></li>
+                <li><a href="https://sci-hub.se"        target="_blank" rel="noopener noreferrer">sci-hub.se</a></li>
+                <li><a href="https://royallib.com"      target="_blank" rel="noopener noreferrer">royallib.com</a></li>
+            </ul>
+        </section>
+
+        <!-- eBooks -->
+        <section class="source-section">
+            <h2>eBooks <span class="source-count">16</span></h2>
+            <ul class="source-list">
+                <li><a href="https://www.pdfdrive.com"             target="_blank" rel="noopener noreferrer">pdfdrive.com</a></li>
+                <li><a href="https://ebook-hunter.org"             target="_blank" rel="noopener noreferrer">ebook-hunter.org</a></li>
+                <li><a href="https://ww3.lectulandia.co"           target="_blank" rel="noopener noreferrer">lectulandia.co</a></li>
+                <li><a href="https://library.memoryoftheworld.org" target="_blank" rel="noopener noreferrer">memoryoftheworld.org</a></li>
+                <li><a href="https://oceanofpdf.com"               target="_blank" rel="noopener noreferrer">oceanofpdf.com</a></li>
+                <li><a href="https://pdfroom.com"                  target="_blank" rel="noopener noreferrer">pdfroom.com</a></li>
+                <li><a href="https://www.wowebook.org"             target="_blank" rel="noopener noreferrer">wowebook.org</a></li>
+                <li><a href="https://standardebooks.org"           target="_blank" rel="noopener noreferrer">standardebooks.org</a></li>
+                <li><a href="https://ebookbb.in"                   target="_blank" rel="noopener noreferrer">ebookbb.in</a></li>
+                <li><a href="https://digilibraries.com"            target="_blank" rel="noopener noreferrer">digilibraries.com</a></li>
+                <li><a href="https://bookscafe.net"                target="_blank" rel="noopener noreferrer">bookscafe.net</a></li>
+                <li><a href="https://english-e-reader.net"         target="_blank" rel="noopener noreferrer">english-e-reader.net</a></li>
+                <li><a href="https://www.obooko.com"               target="_blank" rel="noopener noreferrer">obooko.com</a></li>
+                <li><a href="https://manybooks.net"                target="_blank" rel="noopener noreferrer">manybooks.net</a></li>
+                <li><a href="https://epdf.tips"                    target="_blank" rel="noopener noreferrer">epdf.tips</a></li>
+                <li><a href="https://pdfgrab.com"                  target="_blank" rel="noopener noreferrer">pdfgrab.com</a></li>
+            </ul>
+        </section>
+
+        <!-- Audiobooks -->
+        <section class="source-section">
+            <h2>Audiobooks <span class="source-count">15</span></h2>
+            <ul class="source-list">
+                <li><a href="https://librivox.org"                  target="_blank" rel="noopener noreferrer">librivox.org</a></li>
+                <li><a href="https://www.storynory.com"             target="_blank" rel="noopener noreferrer">storynory.com</a></li>
+                <li><a href="https://hotaudiobooks.com"             target="_blank" rel="noopener noreferrer">hotaudiobooks.com</a></li>
+                <li><a href="https://hdaudiobooks.net"              target="_blank" rel="noopener noreferrer">hdaudiobooks.net</a></li>
+                <li><a href="https://bigaudiobooks.net"             target="_blank" rel="noopener noreferrer">bigaudiobooks.net</a></li>
+                <li><a href="https://audiobooks4soul.com"           target="_blank" rel="noopener noreferrer">audiobooks4soul.com</a></li>
+                <li><a href="https://audiobooksbee.com"             target="_blank" rel="noopener noreferrer">audiobooksbee.com</a></li>
+                <li><a href="https://audiozaic.com"                 target="_blank" rel="noopener noreferrer">audiozaic.com</a></li>
+                <li><a href="https://audioaz.com"                   target="_blank" rel="noopener noreferrer">audioaz.com</a></li>
+                <li><a href="https://appaudiobooks.net"             target="_blank" rel="noopener noreferrer">appaudiobooks.net</a></li>
+                <li><a href="https://anyaudiobook.net"              target="_blank" rel="noopener noreferrer">anyaudiobook.net</a></li>
+                <li><a href="https://goldenaudiobook.net"           target="_blank" rel="noopener noreferrer">goldenaudiobook.net</a></li>
+                <li><a href="https://audiobookbay.lu"               target="_blank" rel="noopener noreferrer">audiobookbay.lu <span class="source-tag">torrent index</span></a></li>
+                <li><a href="https://www.learnoutloud.com"          target="_blank" rel="noopener noreferrer">learnoutloud.com</a></li>
+                <li><a href="https://forum.mobilism.org/viewforum.php?f=124" target="_blank" rel="noopener noreferrer">forum.mobilism.org <span class="source-tag">forum</span></a></li>
+            </ul>
+        </section>
+
+        <!-- Comics -->
+        <section class="source-section">
+            <h2>Comics <span class="source-count">2</span></h2>
+            <ul class="source-list">
+                <li><a href="https://getcomics.org"   target="_blank" rel="noopener noreferrer">getcomics.org</a></li>
+                <li><a href="https://oceanofepub.net" target="_blank" rel="noopener noreferrer">oceanofepub.net</a></li>
+            </ul>
+        </section>
+
+        <!-- Magazines -->
+        <section class="source-section">
+            <h2>Magazines <span class="source-count">2</span></h2>
+            <ul class="source-list">
+                <li><a href="https://freemagazines.top" target="_blank" rel="noopener noreferrer">freemagazines.top</a></li>
+                <li><a href="https://magazinelib.com"   target="_blank" rel="noopener noreferrer">magazinelib.com</a></li>
+            </ul>
+        </section>
+
+        <!-- Scientific -->
+        <section class="source-section">
+            <h2>Scientific &amp; Academic <span class="source-count">4</span></h2>
+            <ul class="source-list">
+                <li><a href="https://zenodo.org"           target="_blank" rel="noopener noreferrer">zenodo.org</a></li>
+                <li><a href="https://openstax.org"         target="_blank" rel="noopener noreferrer">openstax.org <span class="source-tag">textbooks</span></a></li>
+                <li><a href="https://libretexts.org"       target="_blank" rel="noopener noreferrer">libretexts.org <span class="source-tag">textbooks</span></a></li>
+                <li><a href="https://open.umn.edu/opentextbooks" target="_blank" rel="noopener noreferrer">open.umn.edu/opentextbooks <span class="source-tag">textbooks</span></a></li>
+            </ul>
+        </section>
+
+        <p class="sources-disclaimer">
+            We do not encourage or condone piracy, this website merely serves as a tool to democratise access to knowledge. Usage choices rest solely on the visitors.
+        </p>
+
+        <!-- ── Source access: logins and cookies, stored only on the machine running RaveBSD ── -->
+        <section class="source-section stats-section">
+            <h2>Source access</h2>
+            <p class="source-note">
+                Some sources need your own account or browser session. These are saved on the machine running
+                RaveBSD, only ever sent to that source, and never shown here again once saved.
+            </p>
+            <div id="access-forms"></div>
+        </section>
+
+        <!-- ── Preferences, saved by the RaveBSD server ───────────────────── -->
+        <section class="source-section stats-section">
+            <h2>Preferences</h2>
+            <div class="prefs-row">
+                <div class="prefs-row-text">
+                    <span class="prefs-row-label">Record local stats</span>
+                    <span class="prefs-row-note">Counts your searches and downloads, stored locally on the machine running RaveBSD. Switching it off stops recording and deletes what is stored.</span>
+                </div>
+                <label class="prefs-switch">
+                    <input type="checkbox" id="local-stats-toggle">
+                    <span class="prefs-switch-track"></span>
+                </label>
+            </div>
+        </section>
+
+    </div>
+
+    <footer class="footer-links">
+        <a href="javascript:history.back()">&#8592; Back to Search</a>
+        <span id="app-version"></span>
+    </footer>
+
+    <script>
+    // ── Count-up helper ─────────────────────────────────────────────────────
+    // Counts a stat number up from 0 instead of showing it at once, and starts when the section scrolls
+    // into view. Easter egg: clicking any stat number switches all of them to scientific notation, and
+    // clicking again undoes it. Each number's real value is kept in data-raw, so switching is only a re-render.
+    var statsNotationMode = 'standard';
+    var SUPERSCRIPT_DIGITS = { '0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹','-':'⁻' };
+    function toSuperscript(n) {
+        return String(n).split('').map(function(c) { return SUPERSCRIPT_DIGITS[c] || c; }).join('');
+    }
+    function toScientific(v) {
+        if (!isFinite(v) || v === 0) return String(v);
+        var exp = Math.floor(Math.log10(Math.abs(v)));
+        var mantissa = v / Math.pow(10, exp);
+        return mantissa.toFixed(2) + '×10' + toSuperscript(exp);
+    }
+    function renderStatEl(el) {
+        var raw = parseFloat(el.dataset.raw);
+        if (isNaN(raw)) return;
+        el.textContent = statsNotationMode === 'scientific' ? toScientific(raw) : (el._statFormatFn || function(v) { return String(Math.round(v)); })(raw);
+    }
+    function toggleStatsNotation() {
+        statsNotationMode = statsNotationMode === 'standard' ? 'scientific' : 'standard';
+        Array.prototype.forEach.call(document.querySelectorAll('[data-raw]'), renderStatEl);
+    }
+    document.addEventListener('click', function(e) {
+        var el = e.target.closest('.stat-tile-value');
+        if (el) toggleStatsNotation();
+    });
+
+    function animateValue(el, target, formatFn, duration) {
+        if (!el) return;
+        duration = duration || 900;
+        formatFn = formatFn || function(v) { return String(Math.round(v)); };
+        el._statFormatFn = formatFn;
+        var start = null;
+        function step(ts) {
+            if (start === null) start = ts;
+            var p = Math.min((ts - start) / duration, 1);
+            var eased = 1 - Math.pow(1 - p, 3); // ease-out cubic
+            var v = target * eased;
+            el.dataset.raw = v;
+            el.textContent = statsNotationMode === 'scientific' ? toScientific(v) : formatFn(v);
+            if (p < 1) requestAnimationFrame(step);
+        }
+        requestAnimationFrame(step);
+    }
+
+    // ── Local stats display ─────────────────────────────────────────────────
+    // loadStats()/postStats() come from js/common.js.
+    function statTile(id, label) {
+        return '<div class="stat-tile"><div class="stat-tile-value" id="' + id + '">0</div>'
+             + '<div class="stat-tile-label">' + label + '</div></div>';
+    }
+    function renderLocalStats() {
+        loadStats().then(drawLocalStats);
+    }
+    function drawLocalStats(s) {
+        var searches = s.searches || {};
+        var formats  = s.formats  || {};
+        var hasAny = (searches.ebooks || searches.audiobooks || s.downloadedBytes || Object.keys(formats).length);
+        var grid = document.getElementById('stats-grid');
+        var fmtsEl = document.getElementById('stats-formats');
+        if (s.enabled === false) {
+            grid.innerHTML = '<p class="stats-empty">Local stats are switched off. Nothing is being recorded.</p>';
+            fmtsEl.innerHTML = '';
+            return;
+        }
+        if (!hasAny) {
+            grid.innerHTML = '<p class="stats-empty">No activity recorded yet, run a search to start tracking.</p>';
+            fmtsEl.innerHTML = '';
+            return;
+        }
+        grid.innerHTML =
+            statTile('stat-local-ebooks', 'eBook searches') +
+            statTile('stat-local-audiobooks', 'Audiobook searches') +
+            statTile('stat-local-mb', 'Est. MB downloaded');
+        animateValue(document.getElementById('stat-local-ebooks'), searches.ebooks || 0);
+        animateValue(document.getElementById('stat-local-audiobooks'), searches.audiobooks || 0);
+        animateValue(document.getElementById('stat-local-mb'), (s.downloadedBytes || 0) / 1048576, function(v) {
+            return v.toFixed(1) + ' MB';
+        });
+
+        var keys = Object.keys(formats).sort(function(a, b) { return formats[b] - formats[a]; });
+        fmtsEl.innerHTML = keys.map(function(k, i) {
+            return '<span class="stats-format-chip"><b id="stat-local-fmt-' + i + '">0</b> ' + k.toUpperCase() + '</span>';
+        }).join('');
+        keys.forEach(function(k, i) {
+            animateValue(document.getElementById('stat-local-fmt-' + i), formats[k]);
+        });
+    }
+    document.getElementById('stats-reset').addEventListener('click', function() {
+        postStats({ reset: true }).then(renderLocalStats);
+    });
+
+    // ── Source access forms (Anna's Archive cookie, Z-Library and Mobilism logins) ──
+    (function() {
+        var SOURCES = [
+            { id: 'annas', title: "Anna's Archive",
+              help: 'Works without setup unless the site asks for a human check. RaveBSD never solves that for you: you complete it yourself, from any device, and it is remembered for later searches.',
+              advancedTitle: 'Advanced: use a cookie from your own browser instead',
+              advancedHelp: 'In your own browser, pass the check, then copy the Cookie header of any request to the site (DevTools, Network tab) and the browser\'s User-Agent. The cookie is tied to your IP, browser and mirror, and expires.',
+              fields: [
+                { key: 'mirror', label: 'Mirror', ph: 'https://annas-archive.gl', advanced: true },
+                { key: 'ua', label: 'User-Agent of that browser', ph: '', def: navigator.userAgent, advanced: true },
+                { key: 'cookie', label: 'Cookie header', area: true, secret: true, advanced: true } ] },
+            { id: 'zlib', title: 'Z-Library',
+              help: 'Works without an account. Your own login makes searches faster and lets Download fetch the file directly, within your account\'s daily limit.',
+              fields: [
+                { key: 'email', label: 'Email', type: 'email' },
+                { key: 'password', label: 'Password', type: 'password', secret: true },
+                { key: 'domain', label: 'Domain (optional)', ph: 'https://z-library.sk' } ] },
+            { id: 'mobilism', title: 'Mobilism',
+              help: 'Only logged-in members can search Mobilism, so this stays off until you add a free account.',
+              fields: [
+                { key: 'username', label: 'Username' },
+                { key: 'password', label: 'Password', type: 'password', secret: true } ] }
+        ];
+        var host = document.getElementById('access-forms');
+        function post(body) {
+            return fetch(API_URL + '/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+                .then(function(r) { return r.json(); });
+        }
+        // One card per source: name + status pill, a plain-language blurb, fields, then clearly separated actions.
+        function summary(id, st) {
+            st = st || {};
+            if (id === 'annas') {
+                if (st.verifyOpen) return { cls: 'warn', pill: 'Verifying', text: 'The verification view is open below. Complete the check there.' };
+                if (st.needsVerify) return { cls: 'warn', pill: 'Needs a check', text: st.browser ? 'Anna\'s Archive is asking for a human check. Press "Verify in browser" and complete it.' : 'Anna\'s Archive is asking for a human check and no background browser is installed. Use a cookie instead.' };
+                if (st.expired) return { cls: 'warn', pill: 'Cookie expired', text: 'The saved cookie no longer works. Paste a fresh one or verify again.' };
+                return st.configured ? { cls: 'ok', pill: 'Ready', text: 'A cookie is saved.' } : { cls: 'ok', pill: 'Ready', text: 'No setup needed unless Anna\'s Archive asks for a check.' };
+            }
+            if (st.configured && st.error) return { cls: 'warn', pill: 'Login failed', text: st.error };
+            if (st.configured) return { cls: 'ok', pill: 'Logged in', text: 'Login saved.' };
+            return id === 'zlib' ? { cls: 'ok', pill: 'Guest mode', text: 'Searching without an account.' } : { cls: 'off', pill: 'Off', text: 'Add a free account to turn this source on.' };
+        }
+        function fieldHtml(f, st) {
+            var val = f.def || (f.key === 'mirror' && st && st.mirror) || '';
+            var saved = f.secret && st && st.configured;
+            var input = f.area
+                ? '<textarea name="' + f.key + '" placeholder="' + (saved ? 'Saved. Paste a new one to replace it.' : '') + '" autocomplete="off" spellcheck="false"></textarea>'
+                : '<input type="' + (f.type || 'text') + '" name="' + f.key + '" value="' + esc(f.secret ? '' : val) + '" placeholder="' + esc(saved ? 'Saved. Type to replace it.' : (f.ph || '')) + '" autocomplete="off" spellcheck="false">';
+            return '<label class="access-field"><span class="access-field-label">' + esc(f.label) + '</span>' + input + '</label>';
+        }
+        function render(settings) {
+            host.innerHTML = '';
+            SOURCES.forEach(function(src) {
+                var st = settings.sources && settings.sources[src.id];
+                var sum = summary(src.id, st);
+                var card = document.createElement('form');
+                card.className = 'access-card';
+                var primary = src.fields.filter(function(f) { return !f.advanced; });
+                var advanced = src.fields.filter(function(f) { return f.advanced; });
+                var html = '<div class="access-head"><span class="access-name">' + esc(src.title) + '</span><span class="access-pill ' + sum.cls + '">' + esc(sum.pill) + '</span></div>'
+                    + '<p class="access-help">' + esc(src.help) + '</p>'
+                    + '<p class="access-state" aria-live="polite">' + esc(sum.text) + '</p>';
+                if (src.id === 'annas') {
+                    html += '<div class="access-actions"><button type="button" class="access-btn primary" data-verify="1">Verify in browser</button>'
+                          + '<span class="access-hint">Opens a view of the server\'s browser right here, for you to pass the check.</span></div>';
+                }
+                html += '<div class="access-fields">' + primary.map(function(f) { return fieldHtml(f, st); }).join('') + '</div>';
+                if (advanced.length) {
+                    html += '<details class="access-advanced"><summary>' + esc(src.advancedTitle) + '</summary><p class="access-help">' + esc(src.advancedHelp) + '</p>'
+                          + '<div class="access-fields">' + advanced.map(function(f) { return fieldHtml(f, st); }).join('') + '</div></details>';
+                }
+                html += '<div class="access-actions access-actions-end"><button type="submit" class="access-btn primary">Save</button>'
+                      + '<button type="button" class="access-btn" data-remove="1">Remove saved details</button></div>';
+                card.innerHTML = html;
+                card.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    var data = {};
+                    src.fields.forEach(function(f) { data[f.key] = card.elements[f.key].value; });
+                    var body = { credentials: {} }; body.credentials[src.id] = data;
+                    post(body).then(render);
+                });
+                var vb = card.querySelector('[data-verify]');
+                if (vb) vb.addEventListener('click', startVerify);
+                card.querySelector('[data-remove]').addEventListener('click', function() {
+                    var body = { credentials: {} }; body.credentials[src.id] = null;
+                    post(body).then(render);
+                });
+                host.appendChild(card);
+            });
+        }
+        fetch(API_URL + '/settings').then(function(r) { return r.json(); }).then(function(st) {
+            if (st.version) document.getElementById('app-version').textContent = 'RaveBSD ' + st.version;
+            render(st);
+        }).catch(function() {});
+
+        function startVerify() { openVerifyModal(function() { fetch(API_URL + '/settings').then(function(r) { return r.json(); }).then(render); }); }
+    })();
+
+    // ── Local stats on/off, saved by the server. Off stops recording and deletes what is stored. ──
+    (function() {
+        var toggle = document.getElementById('local-stats-toggle');
+        loadStats().then(function(s) { toggle.checked = s.enabled !== false; });
+        toggle.addEventListener('change', function() {
+            postStats({ enabled: toggle.checked }).then(renderLocalStats);
+        });
+    })();
+
+    // Local stats reveal themselves when scrolled into view.
+    (function() {
+        var target = document.querySelector('.stats-section');
+        if (!target || !('IntersectionObserver' in window)) { renderLocalStats(); return; }
+        var observer = new IntersectionObserver(function(entries) {
+            entries.forEach(function(entry) {
+                if (entry.isIntersecting) {
+                    observer.disconnect();
+                    renderLocalStats();
+                }
+            });
+        }, { rootMargin: '0px 0px 300px 0px', threshold: 0 });
+        observer.observe(target);
+    })();
+    </script>
+
+</body>
+</html>

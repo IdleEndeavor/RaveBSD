@@ -1,0 +1,27 @@
+# RaveBSD. Start it with: docker compose up -d
+# Everything it saves is in ./data, so backing up this folder (plus .env) backs up the whole deployment.
+services:
+  ravebsd:
+    # The published image is pulled by default. `docker compose up -d --build` builds it from this folder instead.
+    image: ghcr.io/idleendeavor/ravebsd:latest
+    build: .
+    ports:
+      # Left side is the port on your machine: set PORT in .env to change it. 8080 inside the container stays as is.
+      - "${PORT:-8080}:8080"
+    # Runs as your user so ./data stays writable. Change PUID and PGID in .env if `id -u` and `id -g` differ from 1000.
+    user: "${PUID:-1000}:${PGID:-1000}"
+    volumes:
+      # The :z label lets containers write here on SELinux systems (Fedora, RHEL). It does nothing elsewhere.
+      - ./data:/data:z
+    # Chromium needs more shared memory than the Docker default.
+    shm_size: "512mb"
+    # Optional settings, read from .env (see .env.example). Blank means off.
+    environment:
+      USER_AGENT_MODE: ${USER_AGENT_MODE:-}
+      API_KEY: ${API_KEY:-}
+      ZLIB_EMAIL: ${ZLIB_EMAIL:-}
+      ZLIB_PASSWORD: ${ZLIB_PASSWORD:-}
+      ZLIB_DOMAIN: ${ZLIB_DOMAIN:-}
+      MOBILISM_USER: ${MOBILISM_USER:-}
+      MOBILISM_PASS: ${MOBILISM_PASS:-}
+    restart: unless-stopped

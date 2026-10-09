@@ -1,0 +1,1111 @@
+/* Styles for all pages (index.html and backend.html). Dark theme only, Roboto 400/500, no card shadows.
+   Class names starting with "worker-" style the Direct results list; the name is historical.
+   Roboto is self-hosted below (variable font, weights 400-500, Apache License 2.0). */
+@font-face {
+    font-family: 'Roboto';
+    font-style: normal;
+    font-weight: 400 500;
+    font-display: swap;
+    src: url('../fonts/roboto-cyrillic-ext.woff2') format('woff2');
+    unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+@font-face {
+    font-family: 'Roboto';
+    font-style: normal;
+    font-weight: 400 500;
+    font-display: swap;
+    src: url('../fonts/roboto-cyrillic.woff2') format('woff2');
+    unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+    font-family: 'Roboto';
+    font-style: normal;
+    font-weight: 400 500;
+    font-display: swap;
+    src: url('../fonts/roboto-greek-ext.woff2') format('woff2');
+    unicode-range: U+1F00-1FFF;
+}
+@font-face {
+    font-family: 'Roboto';
+    font-style: normal;
+    font-weight: 400 500;
+    font-display: swap;
+    src: url('../fonts/roboto-greek.woff2') format('woff2');
+    unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+@font-face {
+    font-family: 'Roboto';
+    font-style: normal;
+    font-weight: 400 500;
+    font-display: swap;
+    src: url('../fonts/roboto-vietnamese.woff2') format('woff2');
+    unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+@font-face {
+    font-family: 'Roboto';
+    font-style: normal;
+    font-weight: 400 500;
+    font-display: swap;
+    src: url('../fonts/roboto-latin-ext.woff2') format('woff2');
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+    font-family: 'Roboto';
+    font-style: normal;
+    font-weight: 400 500;
+    font-display: swap;
+    src: url('../fonts/roboto-latin.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* ─── Variables ───────────────────────────────────────────────────────────── */
+:root {
+    --bg:            #111114;
+    --bg2:           #1a1a20;
+    --bg3:           #222229;
+    --bg4:           #2a2a32;
+    --text:          #eeeef2;
+    --text-muted:    #77778a;
+    --text-dim:      #44444f;
+    --primary:       #2a3fd4;
+    --primary-hover: #3a50e8;
+    --primary-dim:   rgba(42,63,212,0.18);
+    --border:        rgba(255,255,255,0.07);
+    --border-mid:    rgba(255,255,255,0.12);
+    --border-hover:  rgba(255,255,255,0.18);
+    --t1:            #3a50e8;
+    --t2:            #1a9955;
+    --green:         #4caf7d;
+    --shadow:        rgba(0,0,0,0.5);
+}
+
+/* ─── Reset & base ────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+    height: 100%;
+    font-family: 'Roboto', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+}
+
+/* Set overflow-x on html only. Setting it on body too makes both elements scroll vertically, which traps
+   scrolling inside body and breaks window.scrollY. */
+html { overflow-x: hidden; }
+
+a { color: inherit; text-decoration: none; }
+button { font-family: inherit; }
+
+/* ─── Main search area ─────────────────────────────────────────────────────── */
+.maindiv {
+    position: relative;
+    top: 22%;
+    width: 44%;
+    margin: 0 auto;
+    padding-bottom: 80px;
+}
+
+.searchlogo { text-align: center; margin-bottom: 4px; }
+
+.searchlogo img {
+    max-width: 68%;
+    cursor: pointer;
+    opacity: 1;
+    transition: opacity 1s ease-in-out;
+    display: inline-block;
+}
+
+/* ─── Tagline ─────────────────────────────────────────────────────────────── */
+.tagline {
+    text-align: center;
+    font-size: 14px;
+    line-height: 1.65;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+}
+
+/* ─── Search bar ──────────────────────────────────────────────────────────── */
+/* position:sticky keeps this same search bar at the top while scrolling, with no jump. The .pinned class is
+   added by a scroll listener in index.html once the bar has stuck, and only drives the compact size and
+   the gradient backdrop. */
+.search-bar-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    position: sticky;
+    top: 0;
+    z-index: 150;
+    padding: 10px 0;
+    transition: padding 0.25s ease;
+}
+
+.search-bar-wrap.pinned {
+    padding-bottom: 28px; /* extra room for the fade-out gradient below */
+}
+
+/* Soft backdrop behind the pinned bar. It matches the bar's own width and fades out at the bottom, so
+   results scrolling underneath do not cut off sharply. */
+.search-bar-wrap.pinned::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to bottom, var(--bg) 0%, var(--bg) 55%, transparent 100%);
+    z-index: -1;
+    pointer-events: none;
+}
+
+/* Small logo inside the bar. Hidden normally, and grows in from the left once .pinned is added. */
+.search-bar-logo {
+    height: 0;
+    max-width: 0;
+    opacity: 0;
+    margin-right: 0;
+    flex-shrink: 0;
+    cursor: pointer;
+    object-fit: contain;
+    transition: height 0.3s ease, max-width 0.3s ease, opacity 0.25s ease, margin-right 0.3s ease;
+}
+
+.search-bar-wrap.pinned .search-bar-logo {
+    height: 32px;
+    max-width: 120px;
+    opacity: 1;
+    margin-right: 12px;
+}
+
+.search-input {
+    flex: 1;
+    min-width: 0; /* flex items default to a content-based min-width, which
+                     let this overflow straight through the pinned bar's
+                     padding once space got tight (mobile + shrunk logo) */
+    height: 50px;
+    padding: 0 22px;
+    border-radius: 25px;
+    border: 3px solid var(--primary);
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Roboto', sans-serif;
+    font-size: 17px;
+    outline: none;
+    box-shadow: 0 0 24px rgba(0,0,0,0.5);
+    transition: border-color 0.2s, box-shadow 0.2s;
+    caret-color: var(--text);
+}
+
+.search-input::placeholder { color: var(--text-muted); }
+.search-input:focus {
+    border-color: var(--primary-hover);
+    box-shadow: 0 0 0 4px var(--primary-dim), 0 0 24px rgba(0,0,0,0.5);
+}
+
+.search-btn {
+    flex-shrink: 0;
+    width: 50px; height: 50px;
+    border-radius: 50%; border: none;
+    background: var(--primary);
+    color: #fff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 0 16px rgba(0,0,0,0.5);
+    transition: background 0.2s, transform 0.1s;
+    padding: 0;
+}
+
+.search-btn:hover  { background: var(--primary-hover); }
+.search-btn:active { transform: scale(0.95); }
+.search-btn svg { width: 20px; height: 20px; }
+
+/* ─── Results ─────────────────────────────────────────────────────────────── */
+.results-container { margin-top: 16px; width: 100%; }
+.results-bottom-pad { height: 40px; }
+
+/* ─── Tier blocks ─────────────────────────────────────────────────────────── */
+.tier-block { margin-bottom: 14px; }
+
+.tier-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 7px;
+    padding: 0 2px;
+}
+
+#t3-toggle { cursor: pointer; }
+
+.tier-label {
+    font-size: 11px; font-weight: 500;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.tier-count {
+    font-size: 10px;
+    background: var(--bg3);
+    color: var(--text-muted);
+    border-radius: 20px;
+    padding: 1px 7px;
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+.t3-arrow { font-size: 9px; color: var(--text-dim); }
+
+/* ─── Source card grid ────────────────────────────────────────────────────── */
+.source-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+    gap: 5px;
+}
+
+.collapsible { display: none; }
+.collapsible.open { display: grid; }
+
+.source-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 9px 11px;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    background: var(--bg2);
+    font-size: 13px;
+    gap: 5px;
+    transition: border-color 0.15s, background 0.15s;
+}
+
+.source-card:hover { border-color: var(--border-hover); background: var(--bg3); }
+.card-label { color: var(--text); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card-arrow { flex-shrink: 0; font-size: 12px; color: var(--text-dim); transition: color 0.15s; }
+.source-card:hover .card-arrow { color: var(--text-muted); }
+
+.source-card.tier1 { border-left: 3px solid var(--t1); }
+.source-card.tier1 .card-arrow { color: var(--t1); opacity: 0.7; }
+.source-card.tier1:hover .card-arrow { opacity: 1; }
+
+.source-card.tier2 { border-left: 3px solid var(--t2); }
+.source-card.tier2 .card-arrow { color: var(--t2); opacity: 0.7; }
+.source-card.tier2:hover .card-arrow { opacity: 1; }
+
+.source-card.tier3 { opacity: 0.6; }
+.source-card.tier3:hover { opacity: 1; }
+
+/* ─── Live results ────────────────────────────────────────────────────────── */
+.api-section { margin-top: 16px; }
+
+.api-fetching { font-size: 11px; color: var(--text-dim); font-style: italic; margin: 0 0 0 2px; }
+
+.live-list { display: flex; flex-direction: column; }
+
+.live-item {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 11px 8px;
+    border-bottom: 1px solid var(--border);
+    border-radius: 5px;
+    transition: background 0.15s;
+}
+
+.live-item:hover { background: rgba(255,255,255,0.03); }
+
+.live-title { font-size: 15px; font-weight: 500; color: var(--text); line-height: 1.4; flex: 1; }
+.live-item:hover .live-title { text-decoration: underline; text-decoration-color: var(--primary); }
+.live-source { font-size: 11px; color: var(--green); white-space: nowrap; flex-shrink: 0; }
+
+/* ─── Footer ──────────────────────────────────────────────────────────────── */
+.footer-links {
+    position: fixed;
+    bottom: 0; right: 0;
+    display: flex;
+    gap: 2px;
+    margin: 12px;
+    z-index: 100;
+}
+
+.footer-links a {
+    font-size: 14px;
+    color: var(--text-dim);
+    padding: 5px 8px;
+    border-radius: 5px;
+    transition: color 0.2s;
+}
+
+.footer-links a:hover { color: var(--text-muted); }
+
+.footer-links {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+}
+
+/* ─── Backend page (source list) ──────────────────────────────────────────── */
+.sources-container {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 100px 28px 120px;
+}
+
+.sources-back {
+    display: inline-block;
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 28px;
+    transition: color 0.2s;
+}
+
+.sources-back:hover { color: var(--text); }
+
+.sources-title { font-size: 28px; font-weight: 500; margin-bottom: 8px; }
+
+.sources-intro {
+    color: var(--text-muted);
+    font-size: 14px;
+    margin-bottom: 40px;
+    line-height: 1.65;
+}
+
+.sources-intro a { color: #6b8cff; text-decoration: underline; }
+
+.source-section { margin-bottom: 36px; }
+
+.source-section h2 {
+    font-size: 15px; font-weight: 500;
+    border-bottom: 1px solid var(--border-mid);
+    padding-bottom: 8px;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text);
+}
+
+.source-count {
+    font-size: 11px; font-weight: 400;
+    background: var(--primary);
+    color: #fff;
+    border-radius: 20px;
+    padding: 1px 8px;
+}
+
+.source-note {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+    line-height: 1.6;
+}
+
+.source-note a { color: #6b8cff; text-decoration: underline; }
+
+.source-list {
+    list-style: none;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 4px 16px;
+}
+
+.source-list li a {
+    font-size: 14px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    transition: background 0.15s, color 0.15s;
+}
+
+.source-list li a:hover { background: var(--bg2); color: var(--text); }
+
+.source-tag {
+    font-size: 10px;
+    background: var(--bg3);
+    color: var(--text-dim);
+    border-radius: 4px;
+    padding: 1px 5px;
+    white-space: nowrap;
+}
+
+.sources-disclaimer {
+    margin-top: 44px;
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.6;
+    border-top: 1px solid var(--border);
+    padding-top: 18px;
+}
+
+.sources-disclaimer a { color: #6b8cff; text-decoration: underline; }
+
+/* ─── Responsive ──────────────────────────────────────────────────────────── */
+@media (max-width: 1000px) {
+    /* position:static plus margin-top (instead of the desktop top:% offset) so the offset takes up space
+       in the page flow. Otherwise the footer below would overlap the search box and results. */
+    .maindiv { position: static; margin-top: 14vh; top: auto; width: 88%; }
+    .searchlogo img { max-width: 85%; }
+    /* iOS Safari zooms the page when a focused input has a font size under 16px. */
+    .search-input { font-size: 16px; }
+
+    .source-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+    .sources-container { padding-top: 72px; padding-bottom: 40px; }
+    .source-list { grid-template-columns: 1fr; }
+
+    /* ─── Mobile footer ─── The footer sits after the last content instead of floating over it. To keep
+       it at the bottom of the screen when content is short, body is a full-height column and the main
+       area (.maindiv or .sources-container) grows to fill the space (the usual sticky-footer pattern). */
+    body {
+        display: flex;
+        flex-direction: column;
+        min-height: 100vh;
+    }
+    .maindiv, .sources-container {
+        flex: 1 0 auto;
+    }
+    .footer-links {
+        position: static;
+        flex-shrink: 0;
+        margin: 28px 0 20px;
+        width: 100%;
+        padding: 0 20px;
+        box-sizing: border-box;
+        flex-wrap: wrap;
+    }
+    .maindiv { padding-bottom: 24px; }
+
+    /* ─── Pinned search bar on mobile (compact size) ─── */
+    .search-bar-wrap.pinned {
+        padding-left: 12px;
+        padding-right: 12px;
+    }
+    .search-bar-wrap.pinned .search-bar-logo { height: 24px; max-width: 90px; margin-right: 8px; }
+    .search-bar-wrap.pinned .search-input { height: 38px; font-size: 14px; }
+    .search-bar-wrap.pinned .search-btn { width: 38px; height: 38px; }
+}
+
+/* ─── Direct results list (class names start with worker-) ────────────────── */
+
+.worker-results {
+    margin-bottom: 18px;
+}
+
+/* Loading state: vertical list of sources, crossed off as each reports in */
+.worker-loading {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 14px 2px;
+}
+
+.progress-label {
+    font-size: 12px;
+    color: var(--text-dim);
+}
+
+.src-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.src-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-muted);
+    padding: 2px 0;
+}
+
+.src-row::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--primary);
+    animation: src-pulse 1s ease-in-out infinite;
+}
+
+.src-row.done {
+    color: var(--text-dim);
+}
+
+.src-row.done .src-name {
+    text-decoration: line-through;
+}
+
+.src-row.done::before {
+    background: var(--text-dim);
+    animation: none;
+}
+
+.src-note {
+    font-size: 11px;
+    color: var(--text-dim);
+}
+
+@keyframes src-pulse {
+    0%, 100% { opacity: 0.35; }
+    50% { opacity: 1; }
+}
+
+/* No results message */
+.worker-empty {
+    font-size: 13px;
+    color: var(--text-dim);
+    padding: 8px 2px 14px;
+}
+
+/* Low direct-result-count nudge toward the source card grid */
+.worker-low-results {
+    font-size: 12px;
+    color: var(--text-dim);
+    padding: 0 2px 10px;
+}
+
+/* Section header */
+.worker-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    padding: 0 2px;
+}
+
+.worker-sources {
+    font-size: 11px;
+    color: var(--text-dim);
+}
+
+/* Source counts and progress text, stacked and right-aligned */
+.worker-header-right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+    min-width: 0;
+    margin-left: 16px;
+    text-align: right;
+}
+.worker-header .tier-label { flex-shrink: 0; }
+
+/* Result list */
+.worker-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-bottom: 18px;
+}
+
+/* Individual result row */
+.worker-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 11px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg2);
+    text-decoration: none;
+    transition: border-color 0.15s, background 0.15s;
+}
+
+.worker-item:hover {
+    border-color: var(--border-hover);
+    background: var(--bg3);
+}
+
+.worker-item-main {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+    min-width: 0;
+}
+
+.worker-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.3;
+}
+
+.worker-item:hover .worker-title {
+    text-decoration: underline;
+    text-decoration-color: var(--primary);
+}
+
+.worker-meta {
+    font-size: 12px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+}
+
+/* Format badge, coloured by format */
+.fmt-badge {
+    font-size: 10px;
+    font-weight: 500;
+    padding: 1px 6px;
+    border-radius: 4px;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+}
+
+.fmt-epub  { background: rgba(42,63,212,0.25); color: #7b9fff; }
+.fmt-mobi  { background: rgba(26,153,85,0.25); color: #5ecf8a; }
+.fmt-azw3  { background: rgba(26,153,85,0.25); color: #5ecf8a; }
+.fmt-fb2   { background: rgba(138,92,200,0.25); color: #b88ff0; }
+.fmt-pdf   { background: rgba(200,80,60,0.25); color: #f07060; }
+.fmt-djvu  { background: rgba(150,100,30,0.25); color: #d4a84b; }
+.fmt-cbz,
+.fmt-cbr   { background: rgba(60,140,180,0.25); color: #5aafdb; }
+/* M4B gets its own yellow so it reads apart from MP3 at a glance */
+.fmt-m4b   { background: rgba(212,168,20,0.25); color: #e0c34f; }
+.fmt-mp3,
+.fmt-m4a,
+.fmt-flac,
+.fmt-aac   { background: rgba(180,90,190,0.25); color: #d68fe0; }
+
+/* Source badge (LibGen, Archive.org, Z-Library, ...) */
+.worker-item-right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.worker-source-badge {
+    font-size: 11px;
+    color: var(--text-dim);
+    white-space: nowrap;
+    padding: 2px 7px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--bg3);
+}
+
+/* Green badge for results that have a direct file link */
+.direct-badge {
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: rgba(26,153,85,0.2);
+    color: #5ecf8a;
+    border: 1px solid rgba(26,153,85,0.3);
+}
+
+/* Slightly highlight rows that have a direct link */
+.worker-item-direct {
+    border-color: rgba(26,153,85,0.2);
+}
+
+.worker-item-direct:hover {
+    border-color: rgba(26,153,85,0.4);
+}
+
+/* Yellow badge for downloads with a wait timer (Anna's Archive, AudiobooksBee) */
+.timer-badge {
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: rgba(200,160,0,0.2);
+    color: #d4a84b;
+    border: 1px solid rgba(200,160,0,0.3);
+}
+
+.worker-item-timer {
+    border-color: rgba(200,160,0,0.15);
+}
+
+.worker-item-timer:hover {
+    border-color: rgba(200,160,0,0.35);
+}
+
+/* Purple badge for magnet links (torrents), which open in a torrent client instead of downloading a file */
+.magnet-badge {
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: rgba(180,90,190,0.2);
+    color: #d68fe0;
+    border: 1px solid rgba(180,90,190,0.3);
+}
+
+.worker-item-magnet {
+    border-color: rgba(180,90,190,0.15);
+}
+
+.worker-item-magnet:hover {
+    border-color: rgba(180,90,190,0.35);
+}
+
+
+/* ─── Result covers ───────────────────────────────────────────────────────── */
+.worker-item {
+    /* Row layout with room for the cover */
+    align-items: flex-start !important;
+    gap: 10px !important;
+    padding: 10px !important;
+}
+
+.worker-cover {
+    width: 44px;
+    height: 62px;
+    object-fit: cover;
+    border-radius: 4px;
+    flex-shrink: 0;
+    background: var(--bg3);
+    display: block;
+}
+
+.worker-cover-empty {
+    width: 44px;
+    height: 62px;
+    background: var(--bg3);
+    border-radius: 4px;
+    flex-shrink: 0;
+}
+
+/* Audiobook covers are square (1:1), unlike the ~2:3 ebook covers. Used in audiobook mode instead of
+   .worker-cover and .worker-cover-empty above. */
+.worker-cover-square {
+    width: 62px;
+    height: 62px;
+    object-fit: cover;
+    border-radius: 4px;
+    flex-shrink: 0;
+    background: var(--bg3);
+    display: block;
+}
+
+.worker-cover-empty-square {
+    width: 62px;
+    height: 62px;
+    background: var(--bg3);
+    border-radius: 4px;
+    flex-shrink: 0;
+}
+
+.worker-item-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-top: 2px;
+}
+
+/* ─── Filter chips ────────────────────────────────────────────────────────── */
+.worker-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+    padding: 8px 0 4px;
+    border-top: 1px solid var(--border);
+}
+
+/* Mode chips (eBooks/Audiobooks). Same look as .worker-filters and .filter-chip, but at the very top of
+   the results (drawn by renderSourceLinks in index.html before the direct results load), so it needs no
+   divider above it. */
+.mode-filter-bar {
+    border-top: none;
+    padding-top: 0;
+}
+
+.filter-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.filter-label {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-right: 2px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.filter-chip {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 500;
+    padding: 3px 9px;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    font-family: inherit;
+}
+
+.filter-chip:hover { background: var(--bg4); color: var(--text); }
+.filter-chip.active {
+    background: var(--primary-dim);
+    border-color: var(--primary);
+    color: var(--text);
+}
+
+/* ─── Pagination ──────────────────────────────────────────────────────────── */
+.worker-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 14px 0 6px;
+    border-top: 1px solid var(--border);
+    margin-top: 4px;
+}
+
+.page-btn {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 16px;
+    width: 34px; height: 34px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    font-family: inherit;
+}
+
+.page-btn:hover:not(:disabled) {
+    background: var(--bg3);
+    border-color: var(--border-hover);
+    color: var(--text);
+}
+
+.page-btn:disabled {
+    opacity: 0.3;
+    cursor: default;
+}
+
+.page-info {
+    font-size: 13px;
+    color: var(--text-muted);
+    min-width: 50px;
+    text-align: center;
+}
+
+/* ─── Toast (mobile magnet-copy confirmation) ─────────────────────────────── */
+.toast {
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    transform: translate(-50%, 12px);
+    background: var(--bg4);
+    color: var(--text);
+    border: 1px solid var(--border-mid);
+    border-radius: 10px;
+    padding: 11px 18px;
+    font-size: 13px;
+    font-weight: 500;
+    box-shadow: 0 8px 32px var(--shadow);
+    z-index: 500;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s, transform 0.2s;
+}
+
+.toast.show {
+    opacity: 1;
+    transform: translate(-50%, 0);
+}
+
+/* ─── Local stats (backend page) ──────────────────────────────────────────── */
+.stats-section { margin-top: 44px; }
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.stat-tile {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+}
+
+.stat-tile-value {
+    font-size: 22px;
+    font-weight: 500;
+    color: var(--text);
+    line-height: 1.2;
+}
+
+.stat-tile-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-top: 4px;
+}
+
+.stats-formats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 14px;
+}
+
+.stats-format-chip {
+    font-size: 12px;
+    color: var(--text-muted);
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 4px 10px;
+}
+
+.stats-format-chip b { color: var(--text); font-weight: 500; }
+
+.stats-reset {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 12px;
+    cursor: pointer;
+    padding: 0;
+    transition: color 0.2s;
+}
+
+/* ─── Preferences toggle (backend page) ───────────────────────────────────── */
+.prefs-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+}
+
+.prefs-row-text { display: flex; flex-direction: column; gap: 2px; }
+.prefs-row-label { font-size: 13px; color: var(--text); font-weight: 500; }
+.prefs-row-note  { font-size: 12px; color: var(--text-muted); }
+
+/* Toggle switch built on a checkbox. CSS draws the on/off look, JS only saves the choice. */
+.prefs-switch { position: relative; width: 40px; height: 24px; flex-shrink: 0; }
+.prefs-switch input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    margin: 0;
+    cursor: pointer;
+    z-index: 1;
+}
+.prefs-switch-track {
+    position: absolute;
+    inset: 0;
+    background: var(--bg4);
+    border: 1px solid var(--border-mid);
+    border-radius: 20px;
+    transition: background 0.2s, border-color 0.2s;
+}
+.prefs-switch-track::before {
+    content: '';
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    transition: transform 0.2s, background 0.2s;
+}
+.prefs-switch input:checked + .prefs-switch-track {
+    background: var(--primary-dim);
+    border-color: var(--primary);
+}
+.prefs-switch input:checked + .prefs-switch-track::before {
+    transform: translateX(16px);
+    background: var(--primary);
+}
+
+.stats-reset:hover { color: var(--text-muted); }
+
+.stats-empty {
+    font-size: 13px;
+    color: var(--text-dim);
+    font-style: italic;
+}
+
+/* ─── Source access cards (backend.html) ─────────────────────────────────── */
+.access-card { background: var(--bg2); border: 1px solid var(--border-mid); border-radius: 10px; padding: 20px; margin-bottom: 20px; display: flex; flex-direction: column; gap: 14px; max-width: 640px; }
+.access-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.access-name { font-size: 16px; font-weight: 500; color: var(--text); }
+.access-pill { font-size: 12px; padding: 3px 10px; border-radius: 20px; border: 1px solid var(--border-mid); color: var(--text-muted); white-space: nowrap; }
+.access-pill.ok   { border-color: var(--primary); color: var(--primary); }
+.access-pill.warn { border-color: var(--text); color: var(--text); }
+.access-help  { font-size: 13px; color: var(--text-muted); line-height: 1.55; margin: 0; }
+.access-state { font-size: 13px; color: var(--text); line-height: 1.5; margin: 0; }
+.access-fields { display: flex; flex-direction: column; gap: 14px; }
+.access-field { display: flex; flex-direction: column; gap: 6px; }
+.access-field-label { font-size: 12px; color: var(--text-muted); }
+.access-field input, .access-field textarea { background: var(--bg); color: var(--text); border: 1px solid var(--border-mid); border-radius: 6px; padding: 10px 12px; font-family: 'Roboto', sans-serif; font-size: 13px; width: 100%; box-sizing: border-box; }
+.access-field textarea { min-height: 84px; resize: vertical; }
+.access-field input:focus, .access-field textarea:focus { outline: none; border-color: var(--primary); }
+.access-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.access-actions-end { padding-top: 14px; border-top: 1px solid var(--border-mid); gap: 12px; }
+.access-btn { background: transparent; color: var(--text-muted); border: 1px solid var(--border-mid); border-radius: 6px; padding: 9px 16px; font-size: 13px; font-weight: 500; cursor: pointer; }
+.access-btn:hover { color: var(--text); border-color: var(--border-hover); }
+.access-btn.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+.access-btn.primary:hover { background: var(--primary-hover); }
+.access-hint { font-size: 12px; color: var(--text-muted); }
+.access-advanced { border-top: 1px solid var(--border-mid); padding-top: 12px; }
+.access-advanced summary { font-size: 13px; color: var(--text-muted); cursor: pointer; margin-bottom: 12px; }
+.access-advanced summary:hover { color: var(--text); }
+.access-advanced .access-help { margin-bottom: 14px; }
+#verify-panel { max-width: 640px; margin-top: 8px; }
+
+/* ─── Verification modal (js/verify.js) ──────────────────────────────────── */
+.verify-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 1000; display: flex; align-items: flex-start; justify-content: center; overflow-y: auto; padding: 24px 12px; }
+.verify-box { background: var(--bg2); border: 1px solid var(--border-mid); border-radius: 10px; padding: 20px; width: 100%; max-width: 1040px; display: flex; flex-direction: column; gap: 14px; }
+.verify-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.verify-box img { width: 100%; height: auto; border: 1px solid var(--border-mid); border-radius: 6px; cursor: pointer; background: #fff; }
+.verify-type { display: flex; gap: 10px; }
+.verify-type input { flex: 1; background: var(--bg); color: var(--text); border: 1px solid var(--border-mid); border-radius: 6px; padding: 10px 12px; font-family: 'Roboto', sans-serif; font-size: 13px; }
+.verify-notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 14px; margin: 10px 0; border: 1px solid var(--border-mid); border-radius: 8px; font-size: 13px; color: var(--text); }
+
+/* ─── Advanced search (index.html) ───────────────────────────────────────── */
+.adv-row { display: flex; justify-content: flex-end; margin: 8px 4px 0; }
+.adv-toggle { background: none; border: none; color: var(--text-muted); font-size: 12px; font-family: inherit; cursor: pointer; padding: 4px 0; }
+.adv-toggle:hover, .adv-toggle[aria-expanded="true"] { color: var(--text); }
+.adv-panel { max-width: none; margin-top: 8px; }
+.adv-panel[hidden] { display: none; }
+.adv-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* ─── Card options (Page, Torrent file) ──────────────────────────────────── */
+.card-actions { display: flex; gap: 6px; margin-top: 6px; justify-content: flex-end; flex-wrap: wrap; }
+.card-action { background: transparent; color: var(--text-muted); border: 1px solid var(--border-mid); border-radius: 6px; padding: 3px 9px; font-size: 11px; font-family: inherit; cursor: pointer; }
+.card-action:hover { color: var(--text); border-color: var(--border-hover); }
+.magnet-badge { cursor: pointer; }
