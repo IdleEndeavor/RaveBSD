@@ -315,16 +315,35 @@ export function scoreResult(r, q) {
 }
 
 // ── LibGen ──────────────────────────────────────────────────────────────────
-// ── LibGen ──────────────────────────────────────────────────────────────────
 // Searches libgen.li's /index.php. Results are in <table id="tablelibgen"> with row cells:
 // [cover] title, author, publisher, year, language, pages, size, extension, mirror links.
 // The download page is /ads.php?md5=HASH (resolveLibgenLinks reads the real link from it).
 
-async function searchLibgen(query, mode) {
+// Returns the ISBN-10 or ISBN-13 in a query ("ISBN 978-0-547-92822-7" -> "9780547928227"), or '' when the
+// query is not an ISBN. The check digit must be right, so a random 10 or 13 digit number is not taken for one.
+export function isbnOf(query) {
+    const s = String(query || '').replace(/^\s*isbn(?:-1[03])?:?/i, '').replace(/[\s-]/g, '').toUpperCase();
+    if (/^\d{9}[\dX]$/.test(s)) {
+        const sum = [...s].reduce((t, c, i) => t + (c === 'X' ? 10 : +c) * (10 - i), 0);
+        return sum % 11 === 0 ? s : '';
+    }
+    if (/^97[89]\d{10}$/.test(s)) {
+        const sum = [...s].reduce((t, c, i) => t + +c * (i % 2 ? 3 : 1), 0);
+        return sum % 10 === 0 ? s : '';
+    }
+    return '';
+}
+
+// LibGen only finds an ISBN in its ISBN column (a title and author search for one returns nothing).
+export function libgenSearchParams(query, mode) {
+    const isbn = isbnOf(query);
     const params = new URLSearchParams();
-    params.append('req', query);
-    params.append('columns[]', 't'); // title
-    params.append('columns[]', 'a'); // author
+    params.append('req', isbn || query);
+    if (isbn) params.append('columns[]', 'i'); // ISBN
+    else {
+        params.append('columns[]', 't'); // title
+        params.append('columns[]', 'a'); // author
+    }
     // f=file e=edition s=series a=author p=publisher w=work
     ['f','e','s','a','p','w'].forEach(o => params.append('objects[]', o));
     // l=libgen c=comics f=fiction a=articles m=magazines r=fictionRUS s=standards
@@ -334,7 +353,11 @@ async function searchLibgen(query, mode) {
     // past LibGen's first 25 rows for its own exact title; 50 is one request still.
     params.append('res', '50');
     params.append('filesuns', 'all');
+    return params;
+}
 
+async function searchLibgen(query, mode) {
+    const params = libgenSearchParams(query, mode);
     const found = await fetchFirstValid(
         await orderedMirrors('libgen', LIBGEN_MIRRORS),
         m => `${m}/index.php?${params}`,

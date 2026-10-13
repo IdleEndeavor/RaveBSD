@@ -3,7 +3,7 @@
 // Each block tests one helper. When you add parsing or ranking code, add a block here.
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import worker, { parseFilesizeBytes, royallibUnitChar, get, withDeadline, withEdgeCache, rankMirrors, fetchFirstValid, scoreResult, tokenCoverage, currentUA, setUserAgentMode, BROWSER_UA, RAVE_UA, parseOpts } from '../src/sources.js';
+import worker, { parseFilesizeBytes, royallibUnitChar, get, withDeadline, withEdgeCache, rankMirrors, fetchFirstValid, scoreResult, tokenCoverage, currentUA, setUserAgentMode, BROWSER_UA, RAVE_UA, parseOpts, isbnOf, libgenSearchParams } from '../src/sources.js';
 
 // parseFilesizeBytes: LibGen, Anna's and AudiobookBay each write the size unit differently.
 {
@@ -143,6 +143,32 @@ console.log('sources.js module shape: ok');
     assert.equal(parseOpts(new URL('http://x/?year=abc')).yearFrom, 0);
     assert.deepEqual(parseOpts(new URL('http://x/')), { formats: [], sources: [], yearFrom: 0, yearTo: 0 });
     console.log('parseOpts: ok');
+}
+
+// ISBN queries: hyphens, spaces and an "ISBN" prefix are dropped, the check digit must be right.
+{
+    assert.equal(isbnOf('9780547928227'), '9780547928227');
+    assert.equal(isbnOf(' ISBN 978-0-547-92822-7 '), '9780547928227');
+    assert.equal(isbnOf('isbn: 0-261-10221-4'), '0261102214');
+    assert.equal(isbnOf('080442957X'), '080442957X');
+    assert.equal(isbnOf('080442957x'), '080442957X');
+    assert.equal(isbnOf('9780547928228'), '');   // wrong check digit
+    assert.equal(isbnOf('1234567890123'), '');   // 13 digits, but not an ISBN
+    assert.equal(isbnOf('the hobbit'), '');
+    assert.equal(isbnOf('catch 22'), '');
+    console.log('isbnOf: ok');
+}
+
+// LibGen: an ISBN is looked up in the ISBN column, anything else in title and author.
+{
+    const isbn = libgenSearchParams('978-0-547-92822-7', 'ebooks');
+    assert.equal(isbn.get('req'), '9780547928227');
+    assert.deepEqual(isbn.getAll('columns[]'), ['i']);
+    const text = libgenSearchParams('the hobbit', 'ebooks');
+    assert.equal(text.get('req'), 'the hobbit');
+    assert.deepEqual(text.getAll('columns[]'), ['t', 'a']);
+    assert.deepEqual(libgenSearchParams('x', 'audiobooks').getAll('topics[]'), ['a', 'm']);
+    console.log('libgenSearchParams: ok');
 }
 
 console.log('All sources tests passed.');
