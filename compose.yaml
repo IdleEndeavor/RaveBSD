@@ -1,5 +1,6 @@
 # RaveBSD. Start it with: docker compose up -d
-# Everything it saves is in ./data, so backing up this folder (plus .env) backs up the whole deployment.
+# Settings and the shelf list are in ./data, the books themselves in ./books and ./audiobooks.
+# Backing up these folders (plus .env) backs up the whole deployment.
 services:
   ravebsd:
     # The published image is pulled by default. `docker compose up -d --build` builds it from this folder instead.
@@ -8,20 +9,67 @@ services:
     ports:
       # Left side is the port on your machine: set PORT in .env to change it. 8080 inside the container stays as is.
       - "${PORT:-8080}:8080"
-    # Runs as your user so ./data stays writable. Change PUID and PGID in .env if `id -u` and `id -g` differ from 1000.
+    # Runs as your user so the folders stay writable. Change PUID and PGID in .env if `id -u` and `id -g` differ from 1000.
     user: "${PUID:-1000}:${PGID:-1000}"
     volumes:
       # The :z label lets containers write here on SELinux systems (Fedora, RHEL). It does nothing elsewhere.
       - ./data:/data:z
+      - ${BOOKS_PATH:-./books}:/books:z
+      - ${AUDIOBOOKS_PATH:-./audiobooks}:/audiobooks:z
+      # qBittorrent's downloads folder, so RaveBSD can rename and shelve finished torrents.
+      # Mount the same host folder into qBittorrent (see qBittorrent in the admin panel for the folder mapping).
+      - ${DOWNLOADS_PATH:-./downloads}:/downloads:z
     # Chromium needs more shared memory than the Docker default.
     shm_size: "512mb"
     # Optional settings, read from .env (see .env.example). Blank means off.
     environment:
       USER_AGENT_MODE: ${USER_AGENT_MODE:-}
       API_KEY: ${API_KEY:-}
+      PUBLIC_INSTANCE: ${PUBLIC_INSTANCE:-}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
+      TRUST_PROXY: ${TRUST_PROXY:-}
       ZLIB_EMAIL: ${ZLIB_EMAIL:-}
       ZLIB_PASSWORD: ${ZLIB_PASSWORD:-}
       ZLIB_DOMAIN: ${ZLIB_DOMAIN:-}
       MOBILISM_USER: ${MOBILISM_USER:-}
       MOBILISM_PASS: ${MOBILISM_PASS:-}
     restart: unless-stopped
+    # Docker's usual seccomp profile, plus the namespace calls Chromium's sandbox needs, so the background browser
+    # keeps each page it opens shut away from the rest of the container. Without it the browser still works, unsandboxed.
+    security_opt:
+      - seccomp=./seccomp-chromium.json
+
+  # Optional: qBittorrent for audiobook magnets. Uncomment, then in RaveBSD's first run switch
+  # "Yes, connect qBittorrent" on (or later under qBittorrent in the admin panel). Its Web UI password is printed in `docker compose logs qbittorrent`.
+  # qbittorrent:
+  #   image: lscr.io/linuxserver/qbittorrent:latest
+  #   environment:
+  #     PUID: ${PUID:-1000}
+  #     PGID: ${PGID:-1000}
+  #     WEBUI_PORT: 8080
+  #   ports:
+  #     - "8081:8080"
+  #   volumes:
+  #     - ./qbittorrent:/config:z
+  #     - ${DOWNLOADS_PATH:-./downloads}:/downloads:z
+  #   restart: unless-stopped
+  # (RaveBSD reaches it at http://qbittorrent:8080, the default. Your browser at port 8081.)
+
+  # Optional: send searches and downloads through a VPN with Gluetun. Put `network_mode: "service:gluetun"`
+  # on ravebsd and qbittorrent, move their `ports:` here, and switch on VPN tunnel in the admin panel.
+  # Both then share one network, so give qBittorrent WEBUI_PORT 8081 and use http://localhost:8081 in RaveBSD.
+  # In the admin panel under VPN tunnel, the control server is then http://localhost:8000, with the key set below.
+  # gluetun:
+  #   image: qmcgaw/gluetun
+  #   cap_add: [NET_ADMIN]
+  #   devices: [/dev/net/tun:/dev/net/tun]
+  #   environment:
+  #     VPN_SERVICE_PROVIDER: mullvad
+  #     VPN_TYPE: wireguard
+  #     # plus your provider's keys, see the Gluetun wiki
+  #     # RaveBSD reads the tunnel's state from Gluetun's control server, which needs a key:
+  #     HTTP_CONTROL_SERVER_AUTH_DEFAULT_ROLE: '{"auth":"apikey","apikey":"make-up-a-long-key"}'
+  #   ports:
+  #     - "${PORT:-8080}:8080"
+  #     - "8081:8081"
+  #   restart: unless-stopped

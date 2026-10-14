@@ -22,11 +22,13 @@
 //      downloadUrl, coverUrl. Optional: directUrl (a real file link), pageUrl (the source's own page, when
 //      downloadUrl is the file itself), magnet, infoHash, md5.
 //   3. If the real file link needs another request, add a case to resolveOne() so the page can fetch it later.
-//   4. Add it to runFullSearch() and its meta counts, and to the source lists in public/index.html
-//      (META_SOURCE_LABELS, sourceLabel, ADV_SOURCES). Add a test for any parsing you wrote.
-// RaveBSD never hosts or stores files. It searches public sites and passes on the links they publish.
+//   4. Add it to runFullSearch() and its meta counts, to LIBRARIES in src/server.js (name and which searches it
+//      answers), to LIBS in public/js/search.js (loading bar label) and SRC_INFO in public/js/settings.js.
+//      If its file links come later, add its display name to RESOLVABLE. Add a test for any parsing you wrote.
+// Search results never leave this server as links to fetch: downloads go by result id (src/jobs.js).
 
-import { browserGet, browserAvailable, verifyWindowOpen } from './browser.js';
+import { browserGet, browserFetch, browserAvailable, verifyWindowOpen } from './browser.js';
+import { slumOrder } from './slum.js';
 
 const CORS = {
     'Access-Control-Allow-Origin':  '*',
@@ -94,8 +96,10 @@ export function rankMirrors(staticList, health, now = Date.now()) {
     return ok.map(({ host }) => 'https://' + host);
 }
 
+// SLUM's live status sets the starting order (working mirrors first), then this server's own experience
+// with each host (failures, speed) has the last word.
 async function orderedMirrors(service, staticList) {
-    return rankMirrors(staticList, hostHealth);
+    return rankMirrors(slumOrder(service, staticList), hostHealth);
 }
 
 // Asks mirrors for the same page, `hedge` at a time, best first, and returns the first good response.
@@ -156,7 +160,7 @@ const err = (m,s)=> new Response(JSON.stringify({ error: m, results: [] }), { st
 // Browser User-Agent by default, because many sources refuse unknown ones. USER_AGENT_MODE=rave (or the
 // setting on the Backend page) switches every request to an honest RaveBSD identifier.
 export const BROWSER_UA = 'Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0';
-export const RAVE_UA = 'RaveBSD/0.1 (+https://github.com/IdleEndeavor/RaveBSD)';
+export const RAVE_UA = 'RaveBSD/2.0 (+https://github.com/IdleEndeavor/RaveBSD)';
 let uaMode = 'browser';
 export const setUserAgentMode = m => { uaMode = m === 'rave' ? 'rave' : 'browser'; };
 export const currentUA = () => (uaMode === 'rave' ? RAVE_UA : BROWSER_UA);
@@ -280,6 +284,42 @@ function parseLibgenTitleCell(titleCell) {
 // and "hollywood ending" compare equal.
 const normText = t => (t || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
 
+// How well a result matches the search, from 0 to 1: the share of the search's meaningful words found in
+// the title, author or series. Small words ("the", "for", "is") don't count, accents are ignored and a plural
+// matches its singular, so "the word for world is forest" needs word, world and forest.
+const STOP = new Set('a an and the of for to in on at by with from is are was be or as it its his her de la le les el los las del der die das und et y du des un une'.split(' '));
+const fold = t => normText(String(t || '').normalize('NFD').replace(/\p{M}/gu, ''));
+const stem = w => (w.length > 3 ? w.replace(/(?:es|s)$/, '') : w);
+function queryWords(q) {
+    const all = fold(q).split(' ').filter(w => w.length > 1 || /\d/.test(w));
+    const key = all.filter(w => !STOP.has(w));
+    return (key.length ? key : all).map(stem);
+}
+export function relevance(r, q) {
+    const words = queryWords(q);
+    if (!words.length) return 1;
+    const hay = new Set(fold([r.title, r.author, r.series].filter(Boolean).join(' ')).split(' ').map(stem));
+    return words.filter(w => hay.has(w)).length / words.length;
+}
+// 3: every meaningful word, 2: most, 1: a fair share, 0: unrelated (dropped from the results).
+export const relevanceBand = (r, q) => { const c = relevance(r, q); return c >= 0.99 ? 3 : c >= 0.6 ? 2 : c >= 0.3 ? 1 : 0; };
+// The search minus the words of this result's author's name, when that leaves something: "dune frank herbert"
+// against Dune by Frank Herbert is "dune". Words also in the title stay.
+function withoutAuthor(r, q) {
+    const qw = fold(q).split(' ').filter(Boolean), aw = new Set(fold(r.author).split(' ')), tw = new Set(fold(r.title).split(' '));
+    const rest = qw.filter(w => !aw.has(w) || tw.has(w));
+    return rest.length && rest.length < qw.length ? rest.join(' ') : '';
+}
+// The title words of a search that names an author: what most results matching every word agree on once
+// their author's name is taken out ('' when the search names no author).
+export function titleWordsOf(q, results) {
+    const votes = new Map();
+    for (const r of results) { const t = r.author && relevanceBand(r, q) === 3 && withoutAuthor(r, q); if (t) votes.set(t, (votes.get(t) || 0) + 1); }
+    return [...votes].sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+}
+// ISBN searches match nothing in titles, so they are never filtered.
+const isIsbnQuery = q => /(?:^|\D)(?:97[89])?\d{9}[\dx](?:\D|$)/i.test(String(q || '').replace(/[-\s]/g, ''));
+
 // Share of the query's words found in the title or author. It lets "hollywood ending john green" rank
 // the real match above loosely related results.
 export function tokenCoverage(r, q) {
@@ -315,16 +355,35 @@ export function scoreResult(r, q) {
 }
 
 // ── LibGen ──────────────────────────────────────────────────────────────────
-// ── LibGen ──────────────────────────────────────────────────────────────────
 // Searches libgen.li's /index.php. Results are in <table id="tablelibgen"> with row cells:
 // [cover] title, author, publisher, year, language, pages, size, extension, mirror links.
 // The download page is /ads.php?md5=HASH (resolveLibgenLinks reads the real link from it).
 
-async function searchLibgen(query, mode) {
+// Returns the ISBN-10 or ISBN-13 in a query ("ISBN 978-0-547-92822-7" -> "9780547928227"), or '' when the
+// query is not an ISBN. The check digit must be right, so a random 10 or 13 digit number is not taken for one.
+export function isbnOf(query) {
+    const s = String(query || '').replace(/^\s*isbn(?:-1[03])?:?/i, '').replace(/[\s-]/g, '').toUpperCase();
+    if (/^\d{9}[\dX]$/.test(s)) {
+        const sum = [...s].reduce((t, c, i) => t + (c === 'X' ? 10 : +c) * (10 - i), 0);
+        return sum % 11 === 0 ? s : '';
+    }
+    if (/^97[89]\d{10}$/.test(s)) {
+        const sum = [...s].reduce((t, c, i) => t + +c * (i % 2 ? 3 : 1), 0);
+        return sum % 10 === 0 ? s : '';
+    }
+    return '';
+}
+
+// LibGen only finds an ISBN in its ISBN column (a title and author search for one returns nothing).
+export function libgenSearchParams(query, mode) {
+    const isbn = isbnOf(query);
     const params = new URLSearchParams();
-    params.append('req', query);
-    params.append('columns[]', 't'); // title
-    params.append('columns[]', 'a'); // author
+    params.append('req', isbn || query);
+    if (isbn) params.append('columns[]', 'i'); // ISBN
+    else {
+        params.append('columns[]', 't'); // title
+        params.append('columns[]', 'a'); // author
+    }
     // f=file e=edition s=series a=author p=publisher w=work
     ['f','e','s','a','p','w'].forEach(o => params.append('objects[]', o));
     // l=libgen c=comics f=fiction a=articles m=magazines r=fictionRUS s=standards
@@ -334,7 +393,11 @@ async function searchLibgen(query, mode) {
     // past LibGen's first 25 rows for its own exact title; 50 is one request still.
     params.append('res', '50');
     params.append('filesuns', 'all');
+    return params;
+}
 
+async function searchLibgen(query, mode) {
+    const params = libgenSearchParams(query, mode);
     const found = await fetchFirstValid(
         await orderedMirrors('libgen', LIBGEN_MIRRORS),
         m => `${m}/index.php?${params}`,
@@ -434,8 +497,8 @@ async function searchLibgen(query, mode) {
 // The ads.php page has a button linking to get.php?md5=HASH&key=KEY. We fetch ads.php for a result, read
 // the key and build the direct URL. It tries a few mirrors, separate from the search mirror, because any
 // mirror that serves ads.php will do.
-async function resolveLibgenLinks(results, topN = 8) {
-    const adsMirrors = (await orderedMirrors('libgen', LIBGEN_MIRRORS)).slice(0, 3);
+async function resolveLibgenLinks(results, topN = 8, skip = []) {
+    const adsMirrors = (await orderedMirrors('libgen', LIBGEN_MIRRORS)).filter(m => !skip.includes(m)).slice(0, 3);
 
     const toResolve = results.slice(0, topN).filter(r => r.md5);
     await Promise.allSettled(toResolve.map(async r => {
@@ -578,7 +641,7 @@ export const annasStatus = async () => ({
     verifyOpen: verifyWindowOpen(),
 });
 // Verification starts on a search page: that is where the site's check appears, the home page is not gated.
-export const annasVerifyUrl = () => ((creds.annas && creds.annas.mirror) || ANNAS_MIRRORS[0]).replace(/\/+$/, '') + '/search?q=dune';
+export const annasVerifyUrl = () => ((creds.annas && creds.annas.mirror) || slumOrder('annas', ANNAS_MIRRORS)[0]).replace(/\/+$/, '') + '/search?q=dune';
 // 'solved' (real results), 'captcha' (a human check is showing), or 'loading'.
 export const annasPageState = html =>
     html.includes('ddg-captcha') ? 'captcha'
@@ -747,6 +810,28 @@ async function searchArchive(query, mode) {
 const IA_EBOOK_EXTS = ['epub', 'pdf', 'mobi', 'azw3', 'djvu', 'txt'];
 const IA_AUDIO_EXTS = ['mp3', 'm4b', 'm4a', 'flac'];
 
+// "13 h 6 min" from seconds; also used for LibriVox.
+export const lengthText = secs => { const m = Math.round(secs / 60); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ' ' + (m % 60) + ' min' : ''}`; };
+// A track's length in the item metadata: seconds ("1234.5") or a clock ("20:34", "1:02:03").
+const iaSecs = v => { const t = String(v || ''); return t.includes(':') ? t.split(':').reduce((a, x) => a * 60 + (+x || 0), 0) : +t || 0; };
+// Audio items usually hold the book in several formats (VBR MP3, 64Kbps MP3, Ogg...). One format's tracks
+// together are the audiobook: their sizes and lengths add up, and several tracks come as the archive's zip.
+const IA_AUDIO_FORMATS = ['VBR MP3', '128Kbps MP3', '64Kbps MP3', 'MP3', 'Apple Lossless Audio', 'M4B', 'Ogg Vorbis', 'Flac'];
+function iaAudioBook(identifier, files) {
+    const audio = files.filter(f => IA_AUDIO_EXTS.some(e => (f.name || '').toLowerCase().endsWith('.' + e)) && f.source !== 'metadata');
+    const fmt = IA_AUDIO_FORMATS.find(x => audio.some(f => f.format === x)) || (audio[0] && audio[0].format);
+    const tracks = audio.filter(f => f.format === fmt);
+    if (!tracks.length) return null;
+    const size = tracks.reduce((a, f) => a + (parseInt(f.size) || 0), 0), secs = tracks.reduce((a, f) => a + iaSecs(f.length), 0);
+    const kbps = (String(fmt).match(/(\d+)Kbps/i) || [])[1];
+    return {
+        url: tracks.length === 1 ? `https://archive.org/download/${identifier}/${encodeURIComponent(tracks[0].name)}`
+            : `https://archive.org/compress/${identifier}/formats=${encodeURIComponent(fmt)}&file=/${identifier}.zip`,
+        format: tracks.length === 1 ? tracks[0].name.split('.').pop().toLowerCase() : 'zip',
+        size, length: secs > 60 ? lengthText(secs) : '', bitrate: kbps ? kbps + ' kbps' : '', tracks: tracks.length,
+    };
+}
+
 async function resolveArchiveLinks(results, mode, topN = 10) {
     const exts = mode === 'audiobooks' ? IA_AUDIO_EXTS : IA_EBOOK_EXTS;
     const toResolve = results.slice(0, topN).filter(r => r.identifier);
@@ -756,6 +841,14 @@ async function resolveArchiveLinks(results, mode, topN = 10) {
             if (!res.ok) return;
             const meta = await res.json();
             const files = Array.isArray(meta.files) ? meta.files : [];
+            const book = mode === 'audiobooks' && iaAudioBook(r.identifier, files);
+            if (book) {
+                Object.assign(r, { directUrl: book.url, directReady: true, format: book.format, tracks: book.tracks });
+                if (book.size) r.filesize = book.size;
+                if (book.length) r.length = book.length;
+                if (book.bitrate) r.bitrate = book.bitrate;
+                return;
+            }
             let best = null;
             for (const ext of exts) {
                 best = files.find(f => (f.name || '').toLowerCase().endsWith('.' + ext));
@@ -773,54 +866,36 @@ async function resolveArchiveLinks(results, mode, topN = 10) {
     return results;
 }
 
-// ── Project Gutenberg (via Gutendex) ──────────────────────────────────────────
-// gutenberg.org has no search API. Gutendex (gutendex.com) mirrors the catalog and already gives direct
-// file URLs, so the search response is the direct link and there is no resolve step. Ebooks only.
-const GUTENBERG_FORMAT_PREFS = [
-    { mime: 'application/epub+zip',           ext: 'epub' },
-    { mime: 'application/x-mobipocket-ebook',  ext: 'mobi' },
-    { mime: 'application/pdf',                 ext: 'pdf'  },
-    { mime: 'text/plain; charset=utf-8',       ext: 'txt'  },
-    { mime: 'text/plain; charset=us-ascii',    ext: 'txt'  },
-    { mime: 'text/plain',                      ext: 'txt'  },
-];
-
+// ── Project Gutenberg ─────────────────────────────────────────────────────────
+// Public-domain ebooks, searched through gutenberg.org's OPDS feed. The search answer is the direct link.
 async function searchGutenberg(query, mode) {
     if (mode === 'audiobooks') return [];
     try {
-        const url = `https://gutendex.com/books/?search=${encodeURIComponent(query)}`;
-        // Gutendex is intermittently slow or erroring; one retry beats a silent empty result.
-        let data = null;
-        for (let attempt = 0; attempt < 2 && !data; attempt++) {
-            try {
-                const res = await get(url, 10000, { 'Accept': 'application/json' });
-                if (res.ok) data = await res.json();
-            } catch (e) { /* retry */ }
-        }
-        if (!data) return [];
-        const books = Array.isArray(data.results) ? data.results : [];
+        // gutenberg.org's own OPDS search feed (Gutendex, the JSON mirror used before, went unreliable). Each
+        // entry gives the book number, title and author; file and cover addresses follow from the number.
+        const res = await get(`https://www.gutenberg.org/ebooks/search.opds/?query=${encodeURIComponent(query)}`, 8000, { 'Accept': 'application/atom+xml' });
+        if (!res.ok) return [];
+        const xml = await res.text();
         const out = [];
-        for (const b of books.slice(0, 10)) {
-            const formats = b.formats || {};
-            let picked = null;
-            for (const pref of GUTENBERG_FORMAT_PREFS) {
-                if (formats[pref.mime]) { picked = { url: formats[pref.mime], ext: pref.ext }; break; }
-            }
-            if (!picked) continue; // nothing directly downloadable for this entry
-            const coverMime = Object.keys(formats).find(k => k.startsWith('image/'));
+        for (const e of xml.split('<entry>').slice(1)) {
+            const id = (e.match(/<id>[^<]*\/ebooks\/(\d+)\.opds<\/id>/) || [])[1];
+            if (!id) continue; // "sort by", "next page" and other navigation entries
+            const title = strip((e.match(/<title>([\s\S]*?)<\/title>/) || [])[1] || '');
+            const file = `https://www.gutenberg.org/ebooks/${id}.epub3.images`;
             out.push({
-                title:       b.title || 'Unknown Title',
-                author:      Array.isArray(b.authors) ? b.authors.map(a => a.name).join(', ') : '',
+                title:       title || 'Unknown Title',
+                author:      strip((e.match(/<content type="text">([\s\S]*?)<\/content>/) || [])[1] || ''),
                 year:        '',
-                format:      picked.ext,
+                format:      'epub',
                 filesize:    0,
-                language:    Array.isArray(b.languages) ? b.languages[0] : '',
+                language:    '',
                 source:      'Project Gutenberg',
-                downloadUrl: picked.url,
-                directUrl:   picked.url,
-                pageUrl:     `https://www.gutenberg.org/ebooks/${b.id}`,
-                coverUrl:    coverMime ? formats[coverMime] : '',
+                downloadUrl: file,
+                directUrl:   file,
+                pageUrl:     `https://www.gutenberg.org/ebooks/${id}`,
+                coverUrl:    `https://www.gutenberg.org/cache/epub/${id}/pg${id}.cover.medium.jpg`,
             });
+            if (out.length >= 10) break;
         }
         return out;
     } catch(e) { return []; }
@@ -964,8 +1039,10 @@ async function searchMemoryOfTheWorld(query, mode) {
 async function searchLibriVox(query, mode) {
     if (mode !== 'audiobooks') return [];
     try {
+        // Titles match from their start and are kept without a leading article ("Raven", not "The Raven").
+        // A search with the author's name in it finds nothing; the title retry in runFullSearch covers that.
         const url = 'https://librivox.org/api/feed/audiobooks/?' + new URLSearchParams({
-            title: '^' + query,
+            title: '^' + query.trim().replace(/^(the|a|an)\s+/i, ''),
             format: 'json',
             extended: '1',
             limit: '10',
@@ -980,16 +1057,22 @@ async function searchLibriVox(query, mode) {
             out.push({
                 title:       b.title || 'Unknown Title',
                 author:      Array.isArray(b.authors) ? b.authors.map(a => [a.first_name, a.last_name].filter(Boolean).join(' ')).join(', ') : '',
-                year:        b.copyright_year || '',
+                year:        b.copyright_year && b.copyright_year !== '0' ? b.copyright_year : '',
                 format:      'zip',
-                filesize:    0,
+                // The zip is LibriVox's 64 kbps MP3s, so its size follows from the running time.
+                filesize:    b.totaltimesecs > 0 ? b.totaltimesecs * 8000 : 0,
+                length:      b.totaltimesecs > 60 ? lengthText(b.totaltimesecs) : '',
+                bitrate:     '64 kbps',
+                abridged:    false, // LibriVox records whole texts
+                // The readers of its sections: one for a solo reading, several for a group one.
+                narrator:    [...new Set((b.sections || []).flatMap(s => (s.readers || []).map(x => x.display_name)).filter(Boolean))].slice(0, 3).join(', '),
                 language:    b.language || '',
                 source:      'LibriVox',
                 downloadUrl: b.url_zip_file,
                 directUrl:   b.url_zip_file,
                 pageUrl:     b.url_librivox || '',
                 directReady: true,
-                coverUrl:    '',
+                coverUrl:    /archive\.org\/details\/[^/?#]+/.test(b.url_iarchive || '') ? 'https://archive.org/services/img/' + b.url_iarchive.match(/details\/([^/?#]+)/)[1] : '',
             });
         }
         return out;
@@ -1006,12 +1089,13 @@ async function searchAudiobookBay(query) {
     // A query with uppercase letters is redirected to the homepage (the site treats it as a bot).
     // Search is case-insensitive, so lowercase it.
     const lowerQuery = query.toLowerCase();
-
+    let answered = false;
     for (const mirror of ABB_MIRRORS) {
         try {
             // cat=undefined,undefined matches what the site's own search box sends
             const url = `${mirror}/?s=${encodeURIComponent(lowerQuery)}&cat=undefined%2Cundefined`;
             const res = await get(url, 8000);
+            answered = true;
             if (!res.ok) continue;
             const html = await res.text();
             // The homepage's "latest uploads" list uses the same class="post" markup as search results, so
@@ -1027,6 +1111,9 @@ async function searchAudiobookBay(query) {
             console.warn('[AudiobookBay] mirror request failed:', e && e.message ? e.message : e);
         }
     }
+    // No mirror answered at all (refused or timed out): an error, not an empty answer, so the title retry
+    // does not wait on it a second time and Settings shows it failing.
+    if (!answered) throw new Error('AudiobookBay did not answer');
     return [];
 }
 
@@ -1149,7 +1236,8 @@ async function resolveAbbMagnets(results, topN = 8) {
                 r.author   = author;
                 r.narrator = narrator;
                 r.bitrate  = bitrate;
-                r.abridged = abridged;
+                // "Unabridged" / "Abridged" on the page; null when it does not say.
+                r.abridged = /unabridged/i.test(abridged) ? false : /abridged/i.test(abridged) ? true : null;
             } catch(e) {
                 console.warn('[AudiobookBay] detail request failed:', e && e.message ? e.message : e);
             }
@@ -1176,7 +1264,7 @@ function mapAbbResults(results) {
         coverUrl:    r.coverUrl || '',
         narrator:    r.narrator || '',
         bitrate:     r.bitrate || '',
-        abridged:    r.abridged || '',
+        abridged:    typeof r.abridged === 'boolean' ? r.abridged : null,
         categories:  r.categories || [],
     }));
 }
@@ -1196,7 +1284,8 @@ async function searchAudiobooksBee(query) {
 
 function parseAudiobooksBeeSearchHtml(html) {
     const results = [];
-    const blocks = html.split('<article class="col_item').slice(1);
+    // Each result is a WordPress post (the theme changed from "col_item" cards to plain post articles).
+    const blocks = html.split(/<article\b(?=[^>]*\b(?:id="post-|class="col_item))/).slice(1);
 
     for (const block of blocks) {
         const titleMatch = block.match(/<h2[^>]*><a href="([^"]+)"[^>]*>([\s\S]*?)<\/a><\/h2>/i);
@@ -1212,7 +1301,7 @@ function parseAudiobooksBeeSearchHtml(html) {
         const byMatch = title.match(/^(.*?)\s+By\s+(.+)$/);
         if (byMatch) { title = byMatch[1].trim(); author = byMatch[2].trim(); }
 
-        const coverMatch = block.match(/data-src="([^"]+)"/i);
+        const coverMatch = block.match(/<img[^>]*?\b(?:data-src|src)="([^"]+)"/i);
         const coverUrl = coverMatch && isHttpUrl(coverMatch[1]) ? coverMatch[1] : '';
 
         results.push({ title, author, detailUrl: href, downloadUrl: href, coverUrl });
@@ -1273,23 +1362,54 @@ const okR = async (env, source, results) => ok({ source, results });
 // ── Z-Library (your own account, via its app API) ───────────────────────────
 // Domains rotate; the first that answers the login wins. Downloads count against the account's daily
 // limit, so /dl/zlib resolves a book's file link only when the user clicks it, never for every result.
-const ZLIB_DOMAINS = ['https://z-lib.gd', 'https://z-lib.gl', 'https://libb.la', 'https://zlib.li'];
+const ZLIB_DOMAINS = ['https://z-library.sk', 'https://1lib.sk', 'https://z-lib.gd', 'https://z-lib.gl', 'https://libb.la', 'https://zlib.li'];
 const ZLIB_SESSION_MS = 6 * 3600 * 1000;
 let zlibSession = null; // { domain, cookie, at }
 let zlibError = '';
-export const zlibStatus = () => ({ error: zlibError });
+// Z-Library's domains sit behind DiamWall, a bot check with an "I'm not a robot" box. Like Anna's Archive, a
+// person passes it once in the server's browser (Settings, verification view); RaveBSD never solves it itself.
+const isDiamWall = t => /DiamWall/.test(t);
+let zlibWall = ''; // the domain whose check is waiting for a person
+export const zlibStatus = () => ({ error: zlibError, needsVerify: !!zlibWall });
+// The domain whose wall was seen, else the first that answers at all (some never do).
+export async function zlibVerifyUrl() {
+    // The wall answers with a 307 to itself, so redirects are not followed (fetch would loop).
+    if (!zlibWall) zlibWall = await Promise.any((await orderedMirrors('zlibrary', ZLIB_DOMAINS)).map(d => get(d + '/', 6000, {}, { redirect: 'manual' }).then(() => d))).catch(() => '');
+    return (zlibWall || ZLIB_DOMAINS[0]) + '/s/dune';
+}
+export const zlibPageState = html => isDiamWall(html) ? 'captcha' : html.includes('<z-bookcard') ? 'solved' : 'loading';
+export async function zlibRecheck() {
+    const t0 = Date.now();
+    const html = await browserGet(await zlibVerifyUrl(), { timeoutMs: 15000, isReady: t => t.includes('<z-bookcard') || (isDiamWall(t) && Date.now() - t0 > 8000) });
+    const solved = !!html && !isDiamWall(html);
+    if (solved) { zlibWall = ''; zlibSession = null; }
+    return solved;
+}
+const wallError = d => { zlibWall = d; zlibError = 'Z-Library wants proof you are a person'; return Object.assign(new Error(zlibError), { wall: true }); };
 const zlibConfigured = () => !!(creds.zlib && creds.zlib.email && creds.zlib.password);
 
 async function zlibCall(domain, path, form, cookie, method = 'POST') {
-    const res = await get(domain + path, 15000,
-        { ...(method === 'POST' ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}), ...(cookie ? { Cookie: cookie } : {}) },
-        { method, ...(method === 'POST' ? { body: form.toString() } : {}) });
-    return res.json();
+    const type = method === 'POST' ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {};
+    const body = method === 'POST' ? { body: form.toString() } : {};
+    // The wall answers with a 307 to itself, so redirects are not followed.
+    const host = domain.replace(/^https:\/\//, ''), t0 = Date.now();
+    let text;
+    try {
+        const res = await get(domain + path, 15000, { ...type, ...(cookie ? { Cookie: cookie } : {}) }, { method, ...body, redirect: 'manual' });
+        text = await res.text();
+    } catch (e) { noteHost(host, false, 0, String(e.message).slice(0, 80)); throw e; } // dead domains drop down the list
+    noteHost(host, true, Date.now() - t0);
+    if (!isDiamWall(text)) return JSON.parse(text);
+    // Walled: ask from inside the server's browser, which carries a check the user already passed.
+    const b = await browserFetch(domain, path, { method, headers: type, credentials: 'include', ...body }, isDiamWall, cookie);
+    if (!b || isDiamWall(b.text)) throw wallError(domain);
+    if (zlibWall === domain) zlibWall = '';
+    return JSON.parse(b.text);
 }
 
 async function zlibLogin() {
     const c = creds.zlib;
-    const domains = c.domain ? [c.domain.replace(/\/+$/, '')] : ZLIB_DOMAINS;
+    const domains = c.domain ? [c.domain.replace(/\/+$/, '')] : await orderedMirrors('zlibrary', ZLIB_DOMAINS);
     for (const d of domains) {
         try {
             const j = await zlibCall(d, '/eapi/user/login', new URLSearchParams({ email: c.email, password: c.password }));
@@ -1298,7 +1418,7 @@ async function zlibLogin() {
                 return (zlibSession = { domain: d, cookie: `remix_userid=${j.user.id}; remix_userkey=${j.user.remix_userkey}`, at: Date.now() });
             }
             if (j && j.error) { zlibError = String(j.error).slice(0, 120); return null; } // bad login: other domains will say the same
-        } catch (e) { /* domain down, try the next */ }
+        } catch (e) { if (e.wall) return null; /* else domain down, try the next */ }
     }
     zlibError = 'No Z-Library domain reachable';
     return null;
@@ -1333,9 +1453,12 @@ export function parseZlibCards(html, domain) {
 }
 
 async function searchZlibraryGuest(query) {
-    for (const d of ZLIB_DOMAINS) {
-        const html = await browserGet(`${d}/s/${encodeURIComponent(query)}`, { timeoutMs: 15000, isReady: h => h.includes('<z-bookcard') });
-        if (html) return parseZlibCards(html, d).slice(0, 50);
+    for (const d of (await orderedMirrors('zlibrary', ZLIB_DOMAINS)).slice(0, 3)) {
+        // The wall can also wave a browser through after a few seconds, so it only counts once it has stayed up.
+        const t0 = Date.now();
+        const html = await browserGet(`${d}/s/${encodeURIComponent(query)}`, { timeoutMs: 15000, isReady: h => h.includes('<z-bookcard') || (isDiamWall(h) && Date.now() - t0 > 8000) });
+        if (html && isDiamWall(html)) { wallError(d); break; }
+        if (html) { if (zlibWall === d) zlibWall = ''; return parseZlibCards(html, d).slice(0, 50); }
     }
     return Object.assign([], { unavailable: true });
 }
@@ -1347,12 +1470,12 @@ async function searchZlibrary(query, mode) {
     const run = async s => zlibCall(s.domain, '/eapi/book/search', new URLSearchParams({ message: query, limit: '50', page: '1' }), s.cookie);
     try {
         let s = await zlibEnsureSession();
-        if (!s) return searchZlibraryGuest(query);
+        if (!s) return zlibWall ? unavailable() : searchZlibraryGuest(query);
         let j = await run(s);
         if (!j || !j.success) { // session expired or revoked: log in once more
             zlibSession = null;
             s = await zlibLogin();
-            if (!s) return searchZlibraryGuest(query);
+            if (!s) return zlibWall ? unavailable() : searchZlibraryGuest(query);
             j = await run(s);
         }
         if (!j || !Array.isArray(j.books)) return searchZlibraryGuest(query);
@@ -1371,17 +1494,21 @@ async function searchZlibrary(query, mode) {
     } catch (e) { return searchZlibraryGuest(query); }
 }
 
-// Redirects to the file link for one book; counts against the account's daily limit.
+// The file link for one book; counts against the account's daily limit. Throws with a readable message.
+export async function zlibFileLink(id, hash) {
+    if (!/^\d+$/.test(id) || !/^[a-z0-9]+$/i.test(hash) || !zlibConfigured()) throw new Error('Z-Library is not set up');
+    const s = await zlibEnsureSession();
+    if (!s) throw new Error('Z-Library login failed: ' + zlibError);
+    const j = await zlibCall(s.domain, `/eapi/book/${id}/${hash}/file`, null, s.cookie, 'GET');
+    const link = j && j.file && j.file.downloadLink;
+    if (!isHttpUrl(link)) throw new Error((j && j.error) ? String(j.error).slice(0, 160) : 'No download link (daily limit reached?)');
+    return link;
+}
 async function zlibDownload(id, hash) {
-    if (!/^\d+$/.test(id) || !/^[a-z0-9]+$/i.test(hash) || !zlibConfigured()) return err('Z-Library is not set up', 404);
     try {
-        const s = await zlibEnsureSession();
-        if (!s) return err('Z-Library login failed: ' + zlibError, 502);
-        const j = await zlibCall(s.domain, `/eapi/book/${id}/${hash}/file`, null, s.cookie, 'GET');
-        const link = j && j.file && j.file.downloadLink;
-        if (!isHttpUrl(link)) return err((j && j.error) ? String(j.error).slice(0, 160) : 'No download link (daily limit reached?)', 502);
+        const link = await zlibFileLink(id, hash);
         return new Response(null, { status: 302, headers: { Location: link, 'Referrer-Policy': 'no-referrer' } });
-    } catch (e) { return err('Z-Library request failed', 502); }
+    } catch (e) { return err(e.message || 'Z-Library request failed', 502); }
 }
 
 // ── Torrent files ───────────────────────────────────────────────────────────
@@ -1390,6 +1517,7 @@ async function zlibDownload(id, hash) {
 const torrentCaches = hash => [`https://itorrents.org/torrent/${hash}.torrent`, `https://itorrents.net/torrent/${hash}.torrent`];
 
 async function torrentFile(id) {
+    if (resultStore.has(id) && !resultStore.get(id).infoHash) await resolveOne(id); // AudiobookBay: read when asked
     const r = resultStore.get(id);
     const hash = String((r && r.infoHash) || '').toLowerCase();
     if (!/^[a-f0-9]{40}$/.test(hash)) return err('No torrent information for this result', 404);
@@ -1442,7 +1570,9 @@ async function mobilismLogin() {
         let cookie = mergeCookies('', page);
         const html = await page.text();
         const sid = (html.match(/name="sid" value="([a-f0-9]+)"/) || [])[1];
-        if (!sid) { mobilismError = 'Login page not recognised'; return null; }
+        // ponytail: Cloudflare's check refuses this server outright; going through the background browser
+        // (as Z-Library does) would get past it if Mobilism keeps it on.
+        if (!sid) { mobilismError = /Just a moment|cf-chl|challenge-platform/i.test(html) ? 'Mobilism is behind a bot check that refuses this server' : 'Login page not recognised'; return null; }
         const res = await get(`${MOBILISM_BASE}/ucp.php?mode=login&sid=${sid}`, 15000,
             { 'Content-Type': 'application/x-www-form-urlencoded', Cookie: cookie },
             { method: 'POST', redirect: 'manual', body: new URLSearchParams({ username: c.username, password: c.password, login: 'Login', redirect: 'index.php', sid, autologin: 'on' }).toString() });
@@ -1513,8 +1643,24 @@ async function searchMobilism(query, mode) {
 // (/resolve) without ever sending a URL for the server to fetch.
 const resultStore = new Map();
 const RESULT_STORE_MAX = 5000;
+export const getResult = id => resultStore.get(id);
+// server.js adds what it knows about each result (link type, whether it is on the shelf, where it would be filed).
+let decorate = r => r;
+export const setResultDecorator = fn => { decorate = fn; };
+// Sources the owner switched off in Settings never run.
+let sourcesOff = new Set();
+export const setSourcesOff = list => { sourcesOff = new Set(list || []); };
+// While the VPN tunnel is down (and Settings say to stop), searches answer with this message instead.
+let searchBlocked = () => '';
+export const setSearchGate = fn => { searchBlocked = fn; };
+// Sources whose real file link is found later through /resolve.
+// How each source did in its most recent search: ok, unavailable, error or timeout. Shown in Settings.
+export const sourceHealth = {};
+export const RESOLVABLE = new Set(['Library Genesis', "Anna's Archive", 'RoyalLib', 'Internet Archive', 'AudiobookBay', 'AudiobooksBee']);
 let idSeq = 0;
-const registerResult = (r, mode) => {
+export const registerResult = (r, mode) => {
+    // Links from a library's page or API become the page's links and the server's downloads: web addresses only.
+    for (const k of ['pageUrl', 'downloadUrl', 'detailUrl', 'directUrl', 'coverUrl', 'topicUrl']) if (r[k] && !isHttpUrl(r[k]) && !String(r[k]).startsWith('/dl/')) delete r[k];
     if (!r.id) r.id = Date.now().toString(36) + (idSeq++).toString(36);
     if (mode) r._mode = mode;
     resultStore.delete(r.id);
@@ -1527,16 +1673,20 @@ const linkTier = r => (r.directUrl ? 2 : r.magnet ? 1 : 0);
 // Audiobook searches put AudiobookBay above everything else (its torrents are the best audiobook source).
 const rankTier = (r, mode) => (mode === 'audiobooks' && r.source === 'AudiobookBay' ? 3 : linkTier(r));
 
-// Within each link tier, take one result per source in turn (each source keeps its own score order),
-// so one source with many direct links cannot fill the whole first page. The page repeats this rule
-// when links resolve (public/index.html, rankResults).
-function interleaveByTier(sorted, mode) {
+// Within each group of equally relevant results with the same link tier, take one result per source in turn
+// (each source keeps its own score order), so one source cannot fill the first page. Relevance always comes
+// first: an unrelated book with a direct link never jumps ahead of a real match.
+export function interleaveGroups(sorted, keyOf) {
     const out = [];
-    for (const tier of [3, 2, 1, 0]) {
+    for (let i = 0; i < sorted.length;) {
+        const k = keyOf(sorted[i]);
+        let j = i;
+        while (j < sorted.length && keyOf(sorted[j]) === k) j++;
         const queues = new Map();
-        for (const r of sorted) if (rankTier(r, mode) === tier) { if (!queues.has(r.source)) queues.set(r.source, []); queues.get(r.source).push(r); }
+        for (const r of sorted.slice(i, j)) { if (!queues.has(r.source)) queues.set(r.source, []); queues.get(r.source).push(r); }
         const lists = [...queues.values()];
-        for (let i = 0; lists.some(l => i < l.length); i++) for (const l of lists) if (i < l.length) out.push(l[i]);
+        for (let n = 0; lists.some(l => n < l.length); n++) for (const l of lists) if (n < l.length) out.push(l[n]);
+        i = j;
     }
     return out;
 }
@@ -1544,37 +1694,67 @@ function interleaveByTier(sorted, mode) {
 // Advanced search filters. Results with no year or format are kept, they may just not say.
 const keepResult = (r, o) =>
     (!o.formats.length || !r.format || o.formats.includes(String(r.format).toLowerCase().replace(/^\./, '')))
-    && (!o.yearFrom || !(parseInt(r.year) > 0) || (parseInt(r.year) >= o.yearFrom && parseInt(r.year) <= o.yearTo));
+    && (!o.yearFrom || !(parseInt(r.year) > 0) || (parseInt(r.year) >= o.yearFrom && parseInt(r.year) <= o.yearTo))
+    && (!o.lang || !r.language || langOf(r.language) === langOf(o.lang));
+// Sources say a language as "English", "en" or "eng"; all of them mean the same here.
+const LANGS = { en: 'english|eng', es: 'spanish|spa|español|espanol', fr: 'french|fra|fre|français|francais', de: 'german|deu|ger|deutsch',
+    it: 'italian|ita|italiano', pt: 'portuguese|por|português|portugues', ru: 'russian|rus|русский', ja: 'japanese|jpn|日本語', zh: 'chinese|zho|chi|中文', nl: 'dutch|nld|dut', pl: 'polish|pol' };
+const langOf = l => { const s = String(l).trim().toLowerCase(); for (const [k, v] of Object.entries(LANGS)) if (s === k || s.startsWith(k + '-') || v.split('|').includes(s)) return k; return s; };
 
 export function parseOpts(url) {
     const list = k => (url.searchParams.get(k) || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
     const y = (url.searchParams.get('year') || '').match(/^\s*(\d{4})(?:\s*-\s*(\d{4}))?\s*$/);
-    return { formats: list('formats'), sources: list('sources'), yearFrom: y ? +y[1] : 0, yearTo: y ? +(y[2] || y[1]) : 0 };
+    const lang = (url.searchParams.get('lang') || '').trim().toLowerCase().replace(/[^a-z]/g, '').slice(0, 20);
+    const title = (url.searchParams.get('q') && url.searchParams.get('title') || '').trim().slice(0, 300);
+    return { formats: list('formats'), sources: list('sources'), yearFrom: y ? +y[1] : 0, yearTo: y ? +(y[2] || y[1]) : 0, lang, title };
 }
-const optsKey = o => (o && (o.formats.length || o.sources.length || o.yearFrom)) ? JSON.stringify(o) : '';
+const optsKey = o => (o && (o.formats.length || o.sources.length || o.yearFrom || o.lang || o.title)) ? JSON.stringify(o) : '';
 
 function mergeAndRank(all, query, mode, opts) {
     if (opts) all = all.filter(r => keepResult(r, opts));
-    all.forEach(r => { r._score = scoreResult(r, query); });
-    all.sort((a, b) => rankTier(b, mode) - rankTier(a, mode) || b._score - a._score);
+    const isbn = isIsbnQuery(query);
+    const phrase = fold(query);
+    all.forEach(r => {
+        r._score = scoreResult(r, query);
+        r._band = isbn ? 3 : relevanceBand(r, query);
+        // With the author's name in the search, the title is judged against the rest of it.
+        const p = r._band === 3 ? (opts && opts.title ? fold(opts.title) : withoutAuthor(r, query)) || phrase : phrase;
+        // The search as a whole phrase in the title beats having all the words scattered about.
+        if (r._band === 3 && p && fold(r.title).includes(p)) r._band = 4;
+        // And a title that is exactly the search (ignoring a series prefix or subtitle) beats both.
+        if (r._band === 4 && fold(String(r.title).replace(/^.*·\s*/, '').replace(/\s*[:(\[].*$/, '')) === p) r._band = 5;
+    });
+    // Unrelated results go, unless nothing matches at all (then the closest are still better than nothing).
+    let pool = all.filter(r => r._band > 0);
+    if (!pool.length) pool = all;
+    pool.sort((a, b) => b._band - a._band || rankTier(b, mode) - rankTier(a, mode) || b._score - a._score);
     const seen = new Set();
-    const out = interleaveByTier(all, mode).filter(r => {
+    const out = interleaveGroups(pool, r => r._band + '|' + rankTier(r, mode)).filter(r => {
         // Source and format are part of the key so other sources and formats of the same book stay visible.
         const key = ((r.title||'') + '|' + (r.author||'') + '|' + (r.source||'') + '|' + (r.format||'')).toLowerCase().replace(/\s+/g,' ').trim();
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
     });
-    out.forEach(r => registerResult(r, mode));
+    out.forEach(r => { registerResult(r, mode); decorate(r); });
     return out;
+}
+
+// LibGen download keys expire, so a download asks for a fresh one just before it starts.
+// skip: mirror origins whose link just failed. Their 500s come and go one mirror at a time.
+export async function freshLibgenLink(md5, skip = []) {
+    if (!/^[a-f0-9]{32}$/i.test(md5 || '')) return '';
+    const t = { md5 };
+    await resolveLibgenLinks([t], 1, skip);
+    return t.directUrl || '';
 }
 
 // Finds one result's direct link. The page calls this for each result through /resolve.
 const resolving = new Map();
-async function resolveOne(id) {
+export async function resolveOne(id) {
     const r = resultStore.get(id);
     if (!r) return null;
-    if (r.directUrl || r.magnet) return r;
+    if (r.directUrl || r.magnet) return decorate(r); // fresh shelf marks, job and naming, not the search's
     if (!resolving.has(id)) {
         resolving.set(id, (async () => {
             const mode = r._mode || 'ebooks';
@@ -1601,7 +1781,8 @@ async function resolveOne(id) {
         })().catch(() => resolving.delete(id)));
     }
     await resolving.get(id);
-    return r;
+    r._resolved = true;
+    return decorate(r);
 }
 
 // resolveTopN limits how many results get a direct link in non-streaming searches (each costs a request).
@@ -1613,24 +1794,26 @@ const RESOLVE_DEADLINE_MS = 12000;
 // {done, count, status, results} each time a source finishes (results is the merged list so far).
 async function runFullSearch(query, mode, resolveTopN, env, onProgress, opts) {
     opts = opts || { formats: [], sources: [], yearFrom: 0, yearTo: 0 };
+    const started = Date.now();
     // Each source is a named job, so adding or skipping one never shifts positions.
     // With advanced search the user can pick sources, and unchosen ones never run.
     const jobs = [];
-    const add = (name, applies, run) => { if (applies && (!opts.sources.length || opts.sources.includes(name))) jobs.push({ name, run: run() }); };
+    const add = (name, applies, run) => { if (applies && !sourcesOff.has(name) && (!opts.sources.length || opts.sources.includes(name))) jobs.push({ name, fn: run, run: run(query) }); };
     const ebooks = mode !== 'audiobooks', audio = !ebooks;
-    add('libgen', true, () => searchLibgen(query, mode));
-    add('annas', ebooks, () => searchAnnas(query, mode));
-    add('archive', true, () => searchArchive(query, mode));
-    add('gutenberg', ebooks, () => searchGutenberg(query, mode));
-    add('openstax', ebooks, () => searchOpenStax(query, mode));
-    add('libretexts', ebooks, () => searchLibreTexts(query, mode));
-    add('memoryoftheworld', ebooks, () => searchMemoryOfTheWorld(query, mode));
-    add('royallib', ebooks, () => searchRoyalLib(query, mode));
-    add('zlibrary', ebooks, () => searchZlibrary(query, mode));
-    add('mobilism', mobilismConfigured(), () => searchMobilism(query, mode));
-    add('audiobookbay', audio, () => searchAudiobookBay(query));
-    add('librivox', audio, () => searchLibriVox(query, mode));
-    add('audiobooksbee', audio, () => searchAudiobooksBee(query));
+    // LibGen has no audiobook section: in audiobook mode only actual audio files it happens to hold count.
+    add('libgen', true, q => searchLibgen(q, mode).then(rs => audio ? rs.filter(r => IA_AUDIO_EXTS.includes(String(r.format).toLowerCase())) : rs));
+    add('annas', ebooks, q => searchAnnas(q, mode));
+    add('archive', true, q => searchArchive(q, mode));
+    add('gutenberg', ebooks, q => searchGutenberg(q, mode));
+    add('openstax', ebooks, q => searchOpenStax(q, mode));
+    add('libretexts', ebooks, q => searchLibreTexts(q, mode));
+    add('memoryoftheworld', ebooks, q => searchMemoryOfTheWorld(q, mode));
+    add('royallib', ebooks, q => searchRoyalLib(q, mode));
+    add('zlibrary', ebooks, q => searchZlibrary(q, mode));
+    add('mobilism', mobilismConfigured(), q => searchMobilism(q, mode));
+    add('audiobookbay', audio, q => searchAudiobookBay(q));
+    add('librivox', audio, q => searchLibriVox(q, mode));
+    add('audiobooksbee', audio, q => searchAudiobooksBee(q));
 
     // Streaming callers (the page) get results as each source finishes and ask for direct links
     // afterwards through /resolve. Plain callers (the JSON API) wait for direct links before the reply.
@@ -1639,6 +1822,14 @@ async function runFullSearch(query, mode, resolveTopN, env, onProgress, opts) {
     const got = {};
     let finished = false;
     const snapshot = () => mergeAndRank([].concat(...Object.values(got).map(v => v.slice())), query, mode, opts);
+    // Plain callers: a source's direct links are looked up as soon as its own search answers, so they no longer
+    // wait for the slowest library. resolveAbbMagnets fills in the raw AudiobookBay objects before norm().
+    const RESOLVERS = {
+        libgen: rs => resolveLibgenLinks(rs, resolveTopN), royallib: rs => resolveRoyalLibLinks(rs, resolveTopN),
+        archive: rs => resolveArchiveLinks(rs, mode, resolveTopN), audiobookbay: rs => resolveAbbMagnets(rs), audiobooksbee: rs => resolveAudiobooksBeeLinks(rs),
+    };
+    const resolveJobs = [];
+    const resolveSoon = (name, v) => { if (!streaming && v.length && RESOLVERS[name]) resolveJobs.push(RESOLVERS[name](v).catch(() => {})); };
 
     if (onProgress) onProgress({ sources: jobs.map(j => j.name) });
     const settled = await Promise.allSettled(jobs.map(j => {
@@ -1646,15 +1837,30 @@ async function runFullSearch(query, mode, resolveTopN, env, onProgress, opts) {
         const report = (v, count, status) => {
             if (reported) return;
             reported = true;
+            sourceHealth[j.name] = { status, at: Date.now(), ms: Date.now() - started };
             if (!streaming || finished) return;
             got[j.name] = norm(j.name, v);
             onProgress({ done: j.name, count, status, results: snapshot() });
         };
         j.run.then(v => report(v, v.length, v.unavailable ? 'unavailable' : 'ok'), () => report([], 0, 'error'));
-        return withDeadline(j.run, SEARCH_DEADLINE_MS, []).then(v => { report([], 0, 'timeout'); return v; });
+        return withDeadline(j.run, SEARCH_DEADLINE_MS, []).then(v => { report([], 0, 'timeout'); resolveSoon(j.name, v); return v; });
     }));
     const byName = {};
     jobs.forEach((j, i) => { byName[j.name] = settled[i].status === 'fulfilled' ? settled[i].value : []; });
+    // "dune frank herbert": some libraries find nothing once the author's name is in the search. Those that
+    // answered empty are asked again with just the title words (advanced search's Title, or the search
+    // without the top match's author).
+    const titleQ = opts.title || titleWordsOf(query, [].concat(...Object.values(byName)));
+    const empty = jobs.filter(j => !byName[j.name].length && sourceHealth[j.name] && sourceHealth[j.name].status === 'ok');
+    if (titleQ && fold(titleQ) !== fold(query) && empty.length) {
+        await Promise.allSettled(empty.map(j => withDeadline(j.fn(titleQ), SEARCH_DEADLINE_MS, []).then(v => {
+            if (!v.length || finished) return;
+            byName[j.name] = v;
+            resolveSoon(j.name, v);
+            sourceHealth[j.name] = { status: 'ok', at: Date.now(), ms: Date.now() - started };
+            if (streaming) { got[j.name] = norm(j.name, v); onProgress({ done: j.name, count: v.length, status: 'ok', results: snapshot() }); }
+        }).catch(() => {})));
+    }
     const count = n => (byName[n] || []).length;
     const meta = () => ({
         libgen: count('libgen'), annas: count('annas'), archive: count('archive'), gutenberg: count('gutenberg'),
@@ -1669,13 +1875,7 @@ async function runFullSearch(query, mode, resolveTopN, env, onProgress, opts) {
         return { results: snapshot(), meta: meta() };
     }
 
-    // Resolve links for all sources at the same time. Doing them one by one adds up the delays.
-    const resolveJobs = [];
-    if (count('libgen')) resolveJobs.push(resolveLibgenLinks(byName.libgen, resolveTopN));
-    if (count('royallib')) resolveJobs.push(resolveRoyalLibLinks(byName.royallib, resolveTopN));
-    if (count('archive')) resolveJobs.push(resolveArchiveLinks(byName.archive, mode, resolveTopN));
-    if (count('audiobookbay')) resolveJobs.push(resolveAbbMagnets(byName.audiobookbay));
-    if (count('audiobooksbee')) resolveJobs.push(resolveAudiobooksBeeLinks(byName.audiobooksbee));
+    // The lookups started by resolveSoon get RESOLVE_DEADLINE_MS more once every search is in, as before.
     await withDeadline(Promise.allSettled(resolveJobs), RESOLVE_DEADLINE_MS, null);
     jobs.forEach(j => { got[j.name] = norm(j.name, byName[j.name] || []); });
     return { results: snapshot(), meta: meta() };
@@ -1688,7 +1888,24 @@ const SEARCH_EDGE_TTL_S = 600;
 const degradedTtl = meta => (meta && meta.libgen > 0 ? SEARCH_EDGE_TTL_S : 60);
 const searchCacheKey = (mode, query, opts) =>
     'https://edge-cache.internal/search/all?mode=' + encodeURIComponent(mode) + '&q=' + encodeURIComponent((query || '').trim().toLowerCase().slice(0, 200))
-    + (optsKey(opts) ? '&o=' + encodeURIComponent(optsKey(opts)) : '');
+    + (optsKey(opts) ? '&o=' + encodeURIComponent(optsKey(opts)) : '')
+    // Switching a source off must not be hidden by a remembered answer.
+    + (sourcesOff.size ? '&off=' + [...sourcesOff].sort().join(',') : '');
+
+// The whole answer (/search/all without stream, and /api/v1/search). The cache holds every result, shared
+// with the streamed search; links=direct and the libraries count are applied on the way out.
+async function plainSearch(url, mode, query, opts, env, ctx) {
+    const res = await withEdgeCache(searchCacheKey(mode, query, opts), ctx, SEARCH_EDGE_TTL_S, async () => {
+        const { results, meta } = await runFullSearch(query, mode, undefined, env, undefined, opts);
+        return [ok({ source: 'all', results, meta }), results.length > 0 && degradedTtl(meta)];
+    });
+    const out = await res.json();
+    // links=direct: only results with a file link (no source pages, no magnets).
+    if (url.searchParams.get('links') === 'direct') out.results = out.results.filter(r => r.directUrl);
+    const names = Object.keys(out.meta || {});
+    out.libraries = { answered: names.filter(n => out.meta[n] > 0).length, total: names.length };
+    return ok(out);
+}
 
 // ── Router ──────────────────────────────────────────────────────────────────
 
@@ -1704,16 +1921,18 @@ export default {
         if (path === '/resolve') {
             const r = await resolveOne(url.searchParams.get('id') || '');
             if (!r) return err('Unknown or expired result', 404);
-            return ok({ id: r.id, directUrl: r.directUrl || '', magnet: r.magnet || '', infoHash: r.infoHash || '', downloadUrl: r.downloadUrl, format: r.format || '', filesize: r.filesize || 0, directFrom: r.directFrom || '' });
+            return ok({ id: r.id, directUrl: r.directUrl || '', magnet: r.magnet || '', infoHash: r.infoHash || '', downloadUrl: r.downloadUrl, format: r.format || '', filesize: r.filesize || 0, directFrom: r.directFrom || '', linkType: r.linkType, fileAs: r.fileAs, onShelf: r.onShelf, length: r.length || '', bitrate: r.bitrate || '', tracks: r.tracks || 0, abridged: r.abridged ?? null, narrator: r.narrator || ''});
         }
         if (path === '/dl/zlib') return zlibDownload(url.searchParams.get('id') || '', url.searchParams.get('hash') || '');
 
         // q, or title and author given separately (advanced search / API callers)
         const query = (url.searchParams.get('q') || [url.searchParams.get('title'), url.searchParams.get('author')].filter(Boolean).join(' ')).trim().slice(0, 300);
-        const mode  = url.searchParams.get('mode') === 'audiobooks' ? 'audiobooks' : 'ebooks';
+        const mode  = url.searchParams.get('mode') === 'audiobooks' || /^audio/.test(url.searchParams.get('kind') || '') ? 'audiobooks' : 'ebooks';
         const opts  = parseOpts(url);
 
         if (!query) return err('No query provided', 400);
+        const blocked = searchBlocked();
+        if (blocked) return err(blocked, 503);
 
         try {
             if (path === '/search/libgen') {
@@ -1800,19 +2019,12 @@ export default {
                     return new Response(ts.readable, { headers: Object.assign({}, CORS, { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store' }) });
                 }
 
-                return withEdgeCache(searchCacheKey(mode, query, opts), ctx, SEARCH_EDGE_TTL_S, async () => {
-                    const { results, meta } = await runFullSearch(query, mode, undefined, env, undefined, opts);
-                    return [ok({ source: 'all', results, meta }), results.length > 0 && degradedTtl(meta)];
-                });
+                return plainSearch(url, mode, query, opts, env, ctx);
             }
 
             if (path === '/api/v1/search') {
                 if (!apiKeyOk(request, env)) return err('Missing or invalid X-API-Key', 401);
-
-                return withEdgeCache(searchCacheKey(mode, query, opts), ctx, SEARCH_EDGE_TTL_S, async () => {
-                    const { results, meta } = await runFullSearch(query, mode, undefined, env, undefined, opts);
-                    return [ok({ source: 'all', results, meta }), results.length > 0 && degradedTtl(meta)];
-                });
+                return plainSearch(url, mode, query, opts, env, ctx);
             }
 
             return err('Unknown endpoint', 404);

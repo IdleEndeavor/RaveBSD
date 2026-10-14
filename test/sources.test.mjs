@@ -3,7 +3,7 @@
 // Each block tests one helper. When you add parsing or ranking code, add a block here.
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import worker, { parseFilesizeBytes, royallibUnitChar, get, withDeadline, withEdgeCache, rankMirrors, fetchFirstValid, scoreResult, tokenCoverage, currentUA, setUserAgentMode, BROWSER_UA, RAVE_UA, parseOpts } from '../src/sources.js';
+import worker, { parseFilesizeBytes, royallibUnitChar, get, withDeadline, withEdgeCache, rankMirrors, fetchFirstValid, scoreResult, tokenCoverage, currentUA, setUserAgentMode, BROWSER_UA, RAVE_UA, parseOpts, relevance, relevanceBand, interleaveGroups, isbnOf, libgenSearchParams } from '../src/sources.js';
 
 // parseFilesizeBytes: LibGen, Anna's and AudiobookBay each write the size unit differently.
 {
@@ -138,11 +138,61 @@ console.log('sources.js module shape: ok');
 // Advanced search options: year or range, formats and sources are lowercased lists, junk is ignored.
 {
     const o = parseOpts(new URL('http://x/?year=1990-2000&formats=EPUB, pdf&sources=libgen,,Annas'));
-    assert.deepEqual(o, { formats: ['epub', 'pdf'], sources: ['libgen', 'annas'], yearFrom: 1990, yearTo: 2000 });
+    assert.deepEqual(o, { formats: ['epub', 'pdf'], sources: ['libgen', 'annas'], yearFrom: 1990, yearTo: 2000, lang: '', title: '' });
     assert.equal(parseOpts(new URL('http://x/?year=2019')).yearTo, 2019);
     assert.equal(parseOpts(new URL('http://x/?year=abc')).yearFrom, 0);
-    assert.deepEqual(parseOpts(new URL('http://x/')), { formats: [], sources: [], yearFrom: 0, yearTo: 0 });
+    assert.deepEqual(parseOpts(new URL('http://x/')), { formats: [], sources: [], yearFrom: 0, yearTo: 0, lang: '', title: '' });
     console.log('parseOpts: ok');
 }
 
+// Relevance: small words don't count, accents and plurals fold, unrelated results score 0.
+{
+    const q = 'the word for world is forest';
+    assert.equal(relevance({ title: 'The Word for World Is Forest', author: 'Ursula K. Le Guin' }, q), 1);
+    assert.equal(relevanceBand({ title: 'Critical Explorations in Science Fiction' }, q), 0);
+    assert.equal(relevanceBand({ title: 'Forests of the World' }, q), 2);
+    assert.equal(relevance({ title: 'Dune', author: 'Frank Herbert' }, 'dune frank herbert'), 1);
+    assert.equal(relevanceBand({ title: 'The Dune Encyclopedia', author: 'Willis McNelly' }, 'dune frank herbert'), 1);
+    assert.equal(relevance({ title: 'Les Misérables' }, 'les miserables'), 1);
+    // Round-robin by source only inside a group: the second group never comes before the first.
+    const list = [{ source: 'A', g: 3 }, { source: 'A', g: 3 }, { source: 'B', g: 3 }, { source: 'C', g: 1 }];
+    assert.deepEqual(interleaveGroups(list, r => r.g).map(r => r.source), ['A', 'B', 'A', 'C']);
+    console.log('relevance: ok');
+}
 console.log('All sources tests passed.');
+
+// Author names in the search: the title is judged without them, and the title words can be worked out.
+{
+    const { titleWordsOf } = await import('../src/sources.js');
+    const novel = { title: 'Dune', author: 'Frank Herbert' }, other = { title: 'Dune Messiah', author: 'Frank Herbert' }, junk = { title: 'Sur la dune', author: 'Anon' };
+    assert.equal(titleWordsOf('dune frank herbert', [novel, other, junk]), 'dune');
+    assert.equal(titleWordsOf('frank herbert dune', [novel]), 'dune');
+    assert.equal(titleWordsOf('dune', [novel]), '');
+    console.log('title words: ok');
+}
+
+// ISBN queries: hyphens, spaces and an "ISBN" prefix are dropped, the check digit must be right.
+{
+    assert.equal(isbnOf('9780547928227'), '9780547928227');
+    assert.equal(isbnOf(' ISBN 978-0-547-92822-7 '), '9780547928227');
+    assert.equal(isbnOf('isbn: 0-261-10221-4'), '0261102214');
+    assert.equal(isbnOf('080442957X'), '080442957X');
+    assert.equal(isbnOf('080442957x'), '080442957X');
+    assert.equal(isbnOf('9780547928228'), '');   // wrong check digit
+    assert.equal(isbnOf('1234567890123'), '');   // 13 digits, but not an ISBN
+    assert.equal(isbnOf('the hobbit'), '');
+    assert.equal(isbnOf('catch 22'), '');
+    console.log('isbnOf: ok');
+}
+
+// LibGen: an ISBN is looked up in the ISBN column, anything else in title and author.
+{
+    const isbn = libgenSearchParams('978-0-547-92822-7', 'ebooks');
+    assert.equal(isbn.get('req'), '9780547928227');
+    assert.deepEqual(isbn.getAll('columns[]'), ['i']);
+    const text = libgenSearchParams('the hobbit', 'ebooks');
+    assert.equal(text.get('req'), 'the hobbit');
+    assert.deepEqual(text.getAll('columns[]'), ['t', 'a']);
+    assert.deepEqual(libgenSearchParams('x', 'audiobooks').getAll('topics[]'), ['a', 'm']);
+    console.log('libgenSearchParams: ok');
+}
