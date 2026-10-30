@@ -992,6 +992,89 @@ async function searchWikisource(query, mode) {
     } catch(e) { return []; }
 }
 
+// ── Libronera ───────────────────────────────────────────────────────────────
+// Spanish ebooks (Epubera's library). Search only: the file links sit behind a password the site shows to
+// people on each book's page, so results link to that page and the download happens there.
+export function parseLibronera(html) {
+    const out = [];
+    for (const a of String(html || '').split('<article ').slice(1)) {
+        const page = (a.match(/<a class="row-thumb" href="(https:\/\/libronera\.com\/[^"]+)"/) || [])[1];
+        const alt = strip((a.match(/<img[^>]*\salt="([^"]*)"/) || [])[1]);
+        if (!page || !alt) continue;
+        const [title, author = ''] = alt.split(' | ');
+        const cover = (a.match(/data-src="(https:\/\/libronera\.com\/wp-content\/[^"]+)"/) || [])[1] || '';
+        out.push({
+            title, author, year: '', format: 'epub', filesize: 0, language: 'es', source: 'Libronera',
+            downloadUrl: page, pageUrl: page, coverUrl: cover,
+        });
+    }
+    return out;
+}
+
+async function searchLibronera(query, mode) {
+    if (mode === 'audiobooks') return [];
+    try {
+        const res = await get(`https://libronera.com/?s=${encodeURIComponent(query)}`, 8000);
+        if (!res.ok) return [];
+        return parseLibronera(await res.text()).slice(0, 10);
+    } catch(e) { return []; }
+}
+
+// ── Ebookelo ────────────────────────────────────────────────────────────────
+// Mostly Spanish ebooks (an ePubLibre mirror), shared as torrents. The search lists books; each book's
+// magnet is on its download page, found when the page asks for it (/resolve), as with AudiobookBay.
+const EBOOKELO = 'https://ww3.ebookelo.com';
+const EBOOKELO_LANG = { espa: 'es', ingl: 'en', fran: 'fr', alem: 'de', ital: 'it', port: 'pt', cata: 'ca' };
+export function parseEbookelo(html) {
+    const out = [];
+    for (const c of String(html || '').split('<div class="bookCard">').slice(1)) {
+        const m = c.match(/<a href="\/ebook\/(\d+)\/([^"]+)"/);
+        if (!m) continue;
+        const page = `${EBOOKELO}/ebook/${m[1]}/${m[2]}`;
+        out.push({
+            title:       strip((c.match(/<h3 class="title">([\s\S]*?)<\/h3>/) || [])[1]) || 'Unknown Title',
+            author:      strip((c.match(/<span class="autor">([\s\S]*?)<\/span>/) || [])[1]),
+            year:        '',
+            format:      'epub',
+            filesize:    0,
+            language:    EBOOKELO_LANG[(c.match(/<span class="flag (\w+)"/) || [])[1]] || '',
+            source:      'Ebookelo',
+            downloadUrl: page,
+            detailUrl:   `${EBOOKELO}/download/${m[1]}/magnet`,
+            pageUrl:     page,
+            coverUrl:    `${EBOOKELO}/images/cover/t/${m[1]}.jpg`,
+        });
+    }
+    return out;
+}
+// The download page's form holds the magnet the countdown would send.
+export const ebookeloMagnet = html => {
+    const v = (String(html || '').match(/name="magnet" value="(magnet:\?[^"]+)"/) || [])[1];
+    return v ? v.replace(/&amp;/g, '&') : '';
+};
+
+async function searchEbookelo(query, mode) {
+    if (mode === 'audiobooks') return [];
+    try {
+        // An empty search answers 404.
+        const res = await get(`${EBOOKELO}/search/${encodeURIComponent(query)}/page/1`, 8000);
+        if (!res.ok) return [];
+        return parseEbookelo(await res.text()).slice(0, 10);
+    } catch(e) { return []; }
+}
+
+async function resolveEbookeloMagnet(r) {
+    if (!r.detailUrl || !r.detailUrl.startsWith(EBOOKELO + '/download/')) return;
+    try {
+        const res = await get(r.detailUrl, 8000);
+        if (!res.ok) return;
+        const magnet = ebookeloMagnet(await res.text());
+        if (!magnet) return;
+        r.magnet = magnet;
+        r.infoHash = ((magnet.match(/btih:([a-f0-9]{40})/i) || [])[1] || '').toLowerCase();
+    } catch(e) { /* no magnet: the result keeps its page link */ }
+}
+
 // ── OpenStax ──────────────────────────────────────────────────────────────────
 // A small list (about 130 titles) of English textbooks. There is no search endpoint, but the whole list is
 // one request, so titles are matched locally. Each match needs one more request to its detail page for
@@ -1765,6 +1848,11 @@ export const SOURCES = [
         search: (q, mode) => searchStandardEbooks(q, mode) },
     { id: 'wikisource', name: 'Wikisource', source: 'Wikisource', kinds: ['ebooks'], info: 'eBooks · public-domain texts, made on request', colour: '#C9C5F2',
         search: (q, mode) => searchWikisource(q, mode) },
+    { id: 'libronera', name: 'Libronera', source: 'Libronera', kinds: ['ebooks'], info: 'eBooks in Spanish · source pages only', colour: '#FFB4A2',
+        search: (q, mode) => searchLibronera(q, mode) },
+    { id: 'ebookelo', name: 'Ebookelo', source: 'Ebookelo', kinds: ['ebooks'], info: 'eBooks, mostly Spanish · magnet links', colour: '#D68FE0',
+        search: (q, mode) => searchEbookelo(q, mode),
+        resolveOne: r => resolveEbookeloMagnet(r) },
     { id: 'openstax', name: 'OpenStax', source: 'OpenStax', kinds: ['ebooks'], info: 'Free textbooks', colour: '#B7A4FF',
         search: (q, mode) => searchOpenStax(q, mode) },
     { id: 'libretexts', name: 'LibreTexts', source: 'LibreTexts', kinds: ['ebooks'], info: 'Free textbooks and course pages', colour: '#A8F0FF',

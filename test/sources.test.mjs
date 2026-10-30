@@ -239,7 +239,7 @@ console.log('All sources tests passed.');
         assert.ok(s.kinds.length && s.kinds.every(k => k === 'ebooks' || k === 'audiobooks'), `${s.id}: kinds`);
         assert.equal(typeof s.search, 'function', `${s.id}: search`);
     }
-    assert.deepEqual([...RESOLVABLE].sort(), ['AudiobookBay', 'AudiobooksBee', "Anna's Archive", 'Internet Archive', 'Library Genesis', 'RoyalLib'].sort());
+    assert.deepEqual([...RESOLVABLE].sort(), ['AudiobookBay', 'AudiobooksBee', "Anna's Archive", 'Ebookelo', 'Internet Archive', 'Library Genesis', 'RoyalLib'].sort());
     // Asking for an unknown source, or one in a search it does not answer, never reaches a library.
     const res = await worker.fetch(new Request('http://x/search/nosuchlibrary?q=dune'), {}, { waitUntil() {} });
     assert.equal(res.status, 404);
@@ -281,4 +281,32 @@ console.log('All sources tests passed.');
     assert.equal(rs[0].directUrl, 'https://ws-export.wmcloud.org/?format=epub&lang=en&page=Pride_and_Prejudice_(1817)');
     assert.equal(rs[0].pageUrl, 'https://en.wikisource.org/wiki/Pride_and_Prejudice_(1817)');
     console.log('parseWikisourcePages: ok');
+}
+
+// Libronera: title and author from the cover's alt text; results only link to the book's page.
+{
+    const { parseLibronera } = await import('../src/sources.js');
+    const rs = parseLibronera(`<article id="post-1" class="book-row"><a class="row-thumb" href="https://libronera.com/dune-frank-herbert/">
+        <img src="//libronera.com/lazy.gif" data-src="https://libronera.com/wp-content/uploads/dune.jpg" alt="Dune (Crónicas de Dune 1) | Frank Herbert" /></a></article>
+        <article id="post-2"><p>no link</p></article>`);
+    assert.equal(rs.length, 1);
+    assert.deepEqual([rs[0].title, rs[0].author, rs[0].language, rs[0].coverUrl], ['Dune (Crónicas de Dune 1)', 'Frank Herbert', 'es', 'https://libronera.com/wp-content/uploads/dune.jpg']);
+    assert.ok(!rs[0].directUrl && !rs[0].magnet, 'no file link: the download stays on the site');
+    console.log('parseLibronera: ok');
+}
+
+// Ebookelo: book cards, and the magnet on a book's download page.
+{
+    const { parseEbookelo, ebookeloMagnet } = await import('../src/sources.js');
+    const card = (id, slug, title, author, flag) => `<div class="bookCard"><div><img src="/images/cover/t/${id}.jpg" />
+        <a href="/ebook/${id}/${slug}" v-on:click="routeGo"><h3 class="title">${title}</h3><span class="autor">${author}</span>
+        <div class="idioma"><span class="flag ${flag}"></span><span>x</span></div></a></div></div>`;
+    const rs = parseEbookelo(card(83316, 'dune', 'Dune', 'Frank Herbert', 'espa') + card(41844, 'dune', 'Dune', 'Frank Herbert', 'ingl'));
+    assert.deepEqual(rs.map(r => [r.title, r.author, r.language]), [['Dune', 'Frank Herbert', 'es'], ['Dune', 'Frank Herbert', 'en']]);
+    assert.equal(rs[0].detailUrl, 'https://ww3.ebookelo.com/download/83316/magnet');
+    assert.equal(rs[0].coverUrl, 'https://ww3.ebookelo.com/images/cover/t/83316.jpg');
+    assert.equal(ebookeloMagnet('<input type="hidden" name="magnet" value="magnet:?xt=urn:btih:E8194F2AD106CA49365016CC6B266B6B4E238C23&amp;dn=Dune" />'),
+        'magnet:?xt=urn:btih:E8194F2AD106CA49365016CC6B266B6B4E238C23&dn=Dune');
+    assert.equal(ebookeloMagnet('<p>countdown</p>'), '');
+    console.log('parseEbookelo: ok');
 }
