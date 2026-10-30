@@ -102,14 +102,17 @@ export const settings = clone(DEFAULTS);
 settings.secrets = { users: [], sessionSecret: '', apiKeys: [] };
 settings.credentials = {};
 
-// A saved file, or null on a first run. A file that cannot be read falls back to the last good copy (.bak) and
-// is set aside as .corrupt-<time>. With no good copy it throws and leaves the file as it is: the caller decides.
+// A saved file, or null on a first run. A damaged file is set aside as .corrupt-<time> and the last good copy
+// (.bak) takes its name again, so the next start finds it too. Throws, leaving the file as it is, when it cannot
+// be read at all (wrong owner, say) or is damaged with no good copy; e.damaged tells the two apart.
 export function readJson(file) {
     let text;
     try { text = fs.readFileSync(file, 'utf8'); } catch (e) { if (e.code === 'ENOENT') return null; throw e; }
     try { return JSON.parse(text); } catch (e) {
-        const bak = JSON.parse(fs.readFileSync(file + '.bak', 'utf8')); // throws when there is none either
+        let bak;
+        try { bak = JSON.parse(fs.readFileSync(file + '.bak', 'utf8')); } catch (e2) { throw Object.assign(new Error('the file is damaged'), { damaged: true }); }
         setAside(file);
+        fs.copyFileSync(file + '.bak', file);
         console.warn(`${file} was damaged, so the previous copy (${path.basename(file)}.bak) is used.`);
         return bak;
     }
@@ -118,14 +121,16 @@ export function setAside(file) {
     const to = file + '.corrupt-' + Date.now();
     try { fs.renameSync(file, to); console.warn(`${file} could not be read and was moved to ${to}.`); } catch (e) { /* already gone */ }
 }
+// A saved file the server may not start without (it would start empty and then save over it).
+export function cannotRead(file, e) {
+    console.error(`${file} cannot be read (${e.message}). Fix or remove it, then start RaveBSD again.`);
+    process.exit(1);
+}
 
 function load() {
     let saved;
-    try { saved = readJson(SETTINGS_FILE); } catch (e) {
-        // Starting with the defaults would offer the first-run setup, and with it the admin account, to anyone.
-        console.error(`${SETTINGS_FILE} cannot be read (${e.message}). Fix or remove it, then start RaveBSD again.`);
-        process.exit(1);
-    }
+    // Starting with the defaults would offer the first-run setup, and with it the admin account, to anyone.
+    try { saved = readJson(SETTINGS_FILE); } catch (e) { cannotRead(SETTINGS_FILE, e); }
     if (!saved) return;
     // v1 files had statsEnabled, userAgentMode and credentials at the top. They carry over as they are.
     for (const k of Object.keys(DEFAULTS)) {
@@ -157,7 +162,10 @@ export function writeJson(file, obj) {
         const tmp = file + '.tmp';
         const fd = fs.openSync(tmp, 'w', 0o600);
         try { fs.writeFileSync(fd, JSON.stringify(obj)); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-        try { fs.rmSync(file + '.bak', { force: true }); fs.linkSync(file, file + '.bak'); } catch (e) { /* first save, or no hard links here */ }
+        if (fs.existsSync(file)) {
+            fs.rmSync(file + '.bak', { force: true });
+            try { fs.linkSync(file, file + '.bak'); } catch (e) { fs.copyFileSync(file, file + '.bak'); } // no hard links on this volume
+        }
         fs.renameSync(tmp, file);
         fs.chmodSync(file, 0o600);
         unsaved.delete(file);
@@ -229,7 +237,7 @@ export let stats = { days: {} };
 try {
     const s = readJson(STATS_FILE);
     if (s && s.days) stats = s; // v1 stats (search counts) are not carried over: v2 counts downloads
-} catch (e) { setAside(STATS_FILE); } // counts only: start again rather than stop
+} catch (e) { if (e.damaged) setAside(STATS_FILE); else cannotRead(STATS_FILE, e); } // damaged counts start again
 const saveStats = () => writeJson(STATS_FILE, stats);
 
 export function countDownload({ kind, format, bytes, author }) {

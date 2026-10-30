@@ -22,6 +22,9 @@ const folder = name => { const d = path.join(root, name); fs.mkdirSync(d, { recu
     assert.equal(r.status, 0, r.stderr);
     assert.equal(JSON.parse(r.stdout.trim().split('\n').pop()).done, true, 'settings come back from the .bak');
     assert.ok(fs.readdirSync(dir).some(f => f.startsWith('settings.json.corrupt-')), 'the damaged file is set aside');
+    // The good copy is back under its own name, so the next start (before any save) is not a first run.
+    r = run(dir, `const c = await import('${src}config.js'); console.log(JSON.stringify({ done: c.settings.setupDone }));`);
+    assert.equal(JSON.parse(r.stdout.trim().split('\n').pop()).done, true, 'a second start after a recovery still has the settings');
     console.log('damaged settings fall back to the last good copy: ok');
 }
 
@@ -47,6 +50,19 @@ const folder = name => { const d = path.join(root, name); fs.mkdirSync(d, { recu
     assert.ok(aside, 'the damaged shelf is set aside');
     assert.equal(fs.readFileSync(path.join(dir, aside), 'utf8'), '{"items": [');
     console.log('damaged shelf is kept aside: ok');
+}
+
+// A shelf that cannot be read (wrong owner after a volume change) is not damaged: it is left alone, not emptied.
+if (process.getuid && process.getuid() !== 0) {
+    const dir = folder('perm');
+    fs.mkdirSync(path.join(dir, 'books'));
+    fs.writeFileSync(path.join(dir, 'shelf.json'), '{"items": []}', { mode: 0 });
+    const r = run(dir, `await import('${src}jobs.js'); console.log('started'); process.exit(0);`);
+    fs.chmodSync(path.join(dir, 'shelf.json'), 0o600);
+    assert.notEqual(r.status, 0, 'does not start');
+    assert.equal(fs.readFileSync(path.join(dir, 'shelf.json'), 'utf8'), '{"items": []}', 'the file is untouched');
+    assert.ok(!fs.readdirSync(dir).some(f => f.includes('.corrupt-')), 'nothing set aside');
+    console.log('unreadable shelf stops the server: ok');
 }
 
 fs.rmSync(root, { recursive: true, force: true });
