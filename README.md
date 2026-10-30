@@ -51,6 +51,8 @@ Click any screenshot to see it full size.
 | Z-Library | Works without an account. Adding your login makes it faster and gives direct downloads within your daily limit |
 | Internet Archive | Lending-library items are left out |
 | Project Gutenberg | |
+| Standard Ebooks | Carefully produced public-domain EPUBs, in English |
+| Wikisource | English Wikisource's public-domain texts, made into an EPUB when you download one |
 | OpenStax | |
 | LibreTexts | |
 | Memory of the World | |

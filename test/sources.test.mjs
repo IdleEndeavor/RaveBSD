@@ -247,3 +247,36 @@ console.log('All sources tests passed.');
     assert.deepEqual(annas.results, [], 'Anna\'s answers ebook searches only');
     console.log('source registry: ok');
 }
+
+// Standard Ebooks: the search page's schema:Book items, and the EPUB name built from the book's address.
+{
+    const { parseStandardEbooks } = await import('../src/sources.js');
+    const item = (about, title, authors) => `<li typeof="schema:Book" about="${about}"><div class="thumbnail-container"><a href="${about}"><picture><img src="/images/covers/x/cover@2x.jpg" alt=""/></picture></a></div>
+        <p><a href="${about}" property="schema:url"><span property="schema:name">${title}</span></a></p>
+        ${authors.map(a => `<p class="author" typeof="schema:Person" property="schema:author"><a href="#"><span property="schema:name">${a}</span></a></p>`).join('')}</li>`;
+    const rs = parseStandardEbooks(`<ol>${item('/ebooks/jane-austen/pride-and-prejudice', 'Pride and Prejudice', ['Jane Austen'])}${item('/ebooks/leo-tolstoy/war-and-peace/louise-maude_aylmer-maude', 'War and Peace', ['Leo Tolstoy'])}${item('/ebooks/a_b/c', 'Two &amp; One', ['A', 'B'])}</ol>`);
+    assert.equal(rs.length, 3);
+    assert.equal(rs[0].directUrl, 'https://standardebooks.org/ebooks/jane-austen/pride-and-prejudice/downloads/jane-austen_pride-and-prejudice.epub?source=download');
+    assert.equal(rs[0].coverUrl, 'https://standardebooks.org/images/covers/x/cover@2x.jpg');
+    assert.equal(rs[1].directUrl, 'https://standardebooks.org/ebooks/leo-tolstoy/war-and-peace/louise-maude_aylmer-maude/downloads/leo-tolstoy_war-and-peace_louise-maude-aylmer-maude.epub?source=download', 'translators: _ inside a segment becomes -');
+    assert.deepEqual([rs[2].title, rs[2].author], ['Two & One', 'A, B']);
+    assert.deepEqual(parseStandardEbooks('<p>No ebooks found.</p>'), []);
+    console.log('parseStandardEbooks: ok');
+}
+
+// Wikisource: only top-level works with a {{header}}; chapters and "versions" lists are left out.
+{
+    const { parseWikisourcePages } = await import('../src/sources.js');
+    const page = (title, content) => ({ title, revisions: [{ slots: { main: { content } } }] });
+    const rs = parseWikisourcePages([
+        page('Pride and Prejudice', '{{versions\n | title = Pride and Prejudice\n | author = Jane Austen\n}}'),
+        page('Pride and Prejudice (1817)', '{{header\n | title    = Pride and Prejudice\n | author   = Jane Austen\n | year = 1817\n | notes = a [[w:Novel|novel]]\n}}'),
+        page('Pride and Prejudice (1817)/Chapter 1', '{{header\n | title = [[../]]\n | author = Jane Austen\n}}'),
+        page('The Raven (1884)', '{{header\n | title = The Raven\n | author = [[Author:Edgar Allan Poe|Edgar Allan Poe]], {{sc|illustrated}}\n | year = c. 1884\n}}'),
+        page('Missing', ''),
+    ]);
+    assert.deepEqual(rs.map(r => [r.title, r.author, r.year]), [['Pride and Prejudice', 'Jane Austen', '1817'], ['The Raven', 'Edgar Allan Poe', '1884']]);
+    assert.equal(rs[0].directUrl, 'https://ws-export.wmcloud.org/?format=epub&lang=en&page=Pride_and_Prejudice_(1817)');
+    assert.equal(rs[0].pageUrl, 'https://en.wikisource.org/wiki/Pride_and_Prejudice_(1817)');
+    console.log('parseWikisourcePages: ok');
+}

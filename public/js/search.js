@@ -11,7 +11,7 @@ import { tidyName } from './rename.js';
 
 // Library names by id, from the server's source registry.
 const libNames = () => (app.settings && app.settings.libraries) || {};
-const SHORT_SRC = { 'Library Genesis': 'LIBGEN', "Anna's Archive": "ANNA'S", 'Internet Archive': 'ARCHIVE', 'Project Gutenberg': 'GUTENBERG', 'Memory of the World': 'MOTW', 'Z-Library': 'Z-LIBRARY' };
+const SHORT_SRC = { 'Library Genesis': 'LIBGEN', "Anna's Archive": "ANNA'S", 'Internet Archive': 'ARCHIVE', 'Project Gutenberg': 'GUTENBERG', 'Memory of the World': 'MOTW', 'Z-Library': 'Z-LIBRARY', 'Standard Ebooks': 'STANDARD' };
 const srcName = s => (s === 'Library Genesis' ? 'LibGen' : s || '');
 const srcShort = s => SHORT_SRC[s] || String(s || '').toUpperCase();
 const LINK = {

@@ -900,6 +900,97 @@ async function searchGutenberg(query, mode) {
     } catch(e) { return []; }
 }
 
+// ── Standard Ebooks ─────────────────────────────────────────────────────────
+// Carefully produced public-domain ebooks, all in English. The search page gives each book's address
+// (/ebooks/<author>/<title>[/<translator>]) and the EPUB's name follows from it. Without ?source=download
+// the file link answers with a thank-you page instead of the file.
+export function parseStandardEbooks(html) {
+    const out = [];
+    for (const li of String(html || '').split('<li typeof="schema:Book"').slice(1)) {
+        const book = (li.match(/^\s*about="(\/ebooks\/[^"?#]+)"/) || [])[1];
+        if (!book) continue;
+        const title = strip((li.match(/<span property="schema:name">([\s\S]*?)<\/span>/) || [])[1]);
+        const authors = [...li.matchAll(/property="schema:author"[\s\S]*?<span property="schema:name">([\s\S]*?)<\/span>/g)].map(m => strip(m[1]));
+        const name = book.split('/').slice(2).map(s => s.replace(/_/g, '-')).join('_');
+        const file = `https://standardebooks.org${book}/downloads/${name}.epub?source=download`;
+        const cover = (li.match(/<img src="(\/images\/covers\/[^"]+)"/) || [])[1];
+        out.push({
+            title:       title || 'Unknown Title',
+            author:      authors.join(', '),
+            year:        '',
+            format:      'epub',
+            filesize:    0,
+            language:    'en',
+            source:      'Standard Ebooks',
+            downloadUrl: file,
+            directUrl:   file,
+            pageUrl:     'https://standardebooks.org' + book,
+            coverUrl:    cover ? 'https://standardebooks.org' + cover : '',
+        });
+    }
+    return out;
+}
+
+async function searchStandardEbooks(query, mode) {
+    if (mode === 'audiobooks') return [];
+    try {
+        const res = await get(`https://standardebooks.org/ebooks?query=${encodeURIComponent(query)}&per-page=12`, 8000);
+        if (!res.ok) return [];
+        return parseStandardEbooks(await res.text()).slice(0, 10);
+    } catch(e) { return []; }
+}
+
+// ── Wikisource ──────────────────────────────────────────────────────────────
+// Public-domain texts transcribed by volunteers (English Wikisource). Its search mostly finds chapters
+// (Title/Chapter 5) and "versions" lists, so only top-level pages with a {{header}} count, and their wikitext
+// gives the author and year: one search, then one request for every candidate's wikitext. Wikisource's export
+// service builds the EPUB when it is downloaded, in a few seconds.
+const WIKISOURCE_API = 'https://en.wikisource.org/w/api.php';
+const wikiText = s => String(s || '').replace(/\[\[(?:[^|\]]*\|)?([^\]]*)\]\]/g, '$1').replace(/\{\{[^{}]*\}\}/g, '').replace(/<[^>]+>/g, '').replace(/'{2,}/g, '').trim().replace(/[\s,;:]+$/, '');
+
+// pages: the API's query.pages (formatversion=2, with each page's wikitext).
+export function parseWikisourcePages(pages) {
+    const out = [];
+    for (const p of pages || []) {
+        const text = (p && p.revisions && p.revisions[0] && p.revisions[0].slots && p.revisions[0].slots.main && p.revisions[0].slots.main.content) || '';
+        if (!p.title || p.title.includes('/') || !/\{\{\s*header\s*\|/i.test(text) || /\{\{\s*(versions|disambiguation|translations)\b/i.test(text)) continue;
+        // A value runs to the next | or line end, links and templates included ([[Author:X|X]]).
+        const param = name => wikiText((text.match(new RegExp(`\\|\\s*${name}\\s*=((?:\\[\\[[^\\]]*\\]\\]|\\{\\{[^{}]*\\}\\}|[^|\\n])*)`, 'i')) || [])[1]);
+        const page = p.title.replace(/ /g, '_');
+        out.push({
+            title:       param('title') || p.title,
+            author:      param('author') || param('override_author'),
+            year:        (param('year').match(/\d{3,4}/) || [''])[0],
+            format:      'epub',
+            filesize:    0,
+            language:    'en',
+            source:      'Wikisource',
+            downloadUrl: `https://ws-export.wmcloud.org/?format=epub&lang=en&page=${encodeURIComponent(page)}`,
+            directUrl:   `https://ws-export.wmcloud.org/?format=epub&lang=en&page=${encodeURIComponent(page)}`,
+            pageUrl:     `https://en.wikisource.org/wiki/${encodeURIComponent(page)}`,
+            coverUrl:    '',
+        });
+    }
+    return out;
+}
+
+async function searchWikisource(query, mode) {
+    if (mode === 'audiobooks') return [];
+    // Wikimedia asks automated clients to say who they are.
+    const headers = { 'User-Agent': RAVE_UA, 'Accept': 'application/json' };
+    try {
+        const found = await get(`${WIKISOURCE_API}?action=query&list=search&srsearch=${encodeURIComponent(query)}&srnamespace=0&srlimit=30&format=json&formatversion=2`, 6000, headers);
+        if (!found.ok) return [];
+        const titles = (((await found.json()).query || {}).search || []).map(s => s.title).filter(t => !t.includes('/')).slice(0, 12);
+        if (!titles.length) return [];
+        const res = await get(`${WIKISOURCE_API}?action=query&prop=revisions&rvprop=content&rvslots=main&titles=${encodeURIComponent(titles.join('|'))}&format=json&formatversion=2`, 8000, headers);
+        if (!res.ok) return [];
+        // The API answers in its own order; keep the search's.
+        const pages = (((await res.json()).query || {}).pages || []).sort((a, b) => titles.indexOf(a.title) - titles.indexOf(b.title));
+        return parseWikisourcePages(pages).slice(0, 10);
+    } catch(e) { return []; }
+}
+
 // ── OpenStax ──────────────────────────────────────────────────────────────────
 // A small list (about 130 titles) of English textbooks. There is no search endpoint, but the whole list is
 // one request, so titles are matched locally. Each match needs one more request to its detail page for
@@ -1669,6 +1760,10 @@ export const SOURCES = [
         resolveOne: (r, mode) => resolveArchiveLinks([r], mode, 1) },
     { id: 'gutenberg', name: 'Project Gutenberg', source: 'Project Gutenberg', kinds: ['ebooks'], info: 'eBooks · public domain', colour: '#FFD54A',
         search: (q, mode) => searchGutenberg(q, mode) },
+    { id: 'standardebooks', name: 'Standard Ebooks', source: 'Standard Ebooks', kinds: ['ebooks'], info: 'eBooks · public domain, carefully produced', colour: '#5EEAB4',
+        search: (q, mode) => searchStandardEbooks(q, mode) },
+    { id: 'wikisource', name: 'Wikisource', source: 'Wikisource', kinds: ['ebooks'], info: 'eBooks · public-domain texts, made on request', colour: '#C9C5F2',
+        search: (q, mode) => searchWikisource(q, mode) },
     { id: 'openstax', name: 'OpenStax', source: 'OpenStax', kinds: ['ebooks'], info: 'Free textbooks', colour: '#B7A4FF',
         search: (q, mode) => searchOpenStax(q, mode) },
     { id: 'libretexts', name: 'LibreTexts', source: 'LibreTexts', kinds: ['ebooks'], info: 'Free textbooks and course pages', colour: '#A8F0FF',
