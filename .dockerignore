@@ -1,6 +1,23 @@
+# The Dockerfile copies only package*.json, src/ and public/. Everything else stays out of the build
+# context: it would only slow the build down, and secrets or a library of books should never be sent to it.
+
+# Secrets and local settings
+.env
+.env.*
+
+# Data, books and downloads of a local install
 data
+books
+audiobooks
+downloads
+qbittorrent
+
+# Not needed at runtime
 node_modules
 .git
+.github
 test
+screenshots
 README.md
 **/development-aide.md
+**/.DS_Store
