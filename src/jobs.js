@@ -129,11 +129,13 @@ export async function startDownload(resultId, clientId, me) {
     const visitor = isVisitor(me);
     if (visitor && !settings.visitors.downloads) throw new Error('Downloads to this server are switched off');
     if (visitor && !me.vid) throw new Error('Reload the page and try again');
-    const existing = shelf.jobs.find(j => j.resultId === resultId && j.state !== 'failed' && canSee(me, j));
-    if (existing) return pub(existing);
+    const existing = () => shelf.jobs.find(j => j.resultId === resultId && j.state !== 'failed' && canSee(me, j));
+    if (existing()) return pub(existing());
     const r = getResult(resultId);
     if (!r) throw new Error('That result has expired. Search again.');
     await resolveOne(resultId);
+    // Asked twice at once (a double click): the second is handed the job the first just made.
+    if (existing()) return pub(existing());
     const fp = fingerprint(r);
     if (visitor) {
         // Already on the server, or on its way: this visitor shares it instead of fetching it again.
@@ -385,15 +387,22 @@ async function finishTorrent(j, t) {
 
 // ── Renaming and filing ──────────────────────────────────────────────────────
 const exists = p => fs.existsSync(p);
+// Names being filed right now count as taken, so two downloads of the same book never pick the same one.
+const filing = new Set();
+const taken = p => filing.has(p) || exists(p);
 async function place(from, to, copy) {
     await fsp.mkdir(path.dirname(to), { recursive: true });
-    if (copy) { await fsp.copyFile(from, to); return; }
-    try { await fsp.rename(from, to); } catch (e) { await fsp.copyFile(from, to); await fsp.rm(from, { force: true }); }
+    if (!copy) try { await fsp.rename(from, to); return; } catch (e) { /* another disk: copy it */ }
+    // Under a temporary name until complete, so a copy cut short (a restart) never passes for the book.
+    const tmp = to + '.incoming';
+    try { await fsp.copyFile(from, tmp); await fsp.rename(tmp, to); } catch (e) { await fsp.rm(tmp, { force: true }); throw e; }
+    if (!copy) await fsp.rm(from, { force: true });
 }
 // Every target must stay inside the shelf folder, whatever the template or the source said.
 const inside = (dir, p) => { const r = path.resolve(dir, p); if (r !== dir && !r.startsWith(dir + path.sep)) throw new Error('Bad file name'); return r; };
 
-async function fileIt(j, files, { copy = false, srcRoot = '' } = {}) {
+// Exported for the tests.
+export async function fileIt(j, files, { copy = false, srcRoot = '' } = {}) {
     j.state = 'renaming'; j.progress = 1; announceJobs();
     const dir = dirFor(j.kind);
     const book = { author: j.author, title: j.title, year: j.year, series: j.series, narrator: j.narrator };
@@ -415,11 +424,13 @@ async function fileIt(j, files, { copy = false, srcRoot = '' } = {}) {
         else rel = j.kind === 'audiobook' ? singleFileAudiobook(templateFor(j.kind), { ...book, ext: j.format })
             : applyTemplate(templateFor(j.kind), { ...book, ext: j.format }, { tidy: settings.shelves.tidy });
         let target = inside(dir, rel);
-        if (exists(target)) {
+        if (taken(target)) {
             if (dup === 'skip') return finish(j, null, 'Already on your shelf, so it was skipped', target);
-            if (dup === 'both') target = numberedPath(target, exists);
+            // "Replace it" never replaces a file another download is still writing.
+            if (dup === 'both' || filing.has(target)) target = numberedPath(target, taken);
         }
-        await place(pick, target, copy);
+        filing.add(target);
+        try { await place(pick, target, copy); } finally { filing.delete(target); }
         mainPath = target; placed = [target];
     } else {
         // Many tracks: a folder named from the template, tracks numbered in order, cover alongside.
@@ -427,22 +438,30 @@ async function fileIt(j, files, { copy = false, srcRoot = '' } = {}) {
         let folder;
         if (!rename) folder = inside(dir, safeSegment(path.basename(srcRoot || j.title)) || j.id);
         else folder = inside(dir, applyTemplate(templateFor(j.kind), { ...book, track: 1, trackCount: audio.length, ext: 'x' }).split('/').slice(0, -1).join('/') || safeSegment(j.title) || j.id);
-        if (exists(folder)) {
+        if (taken(folder)) {
             if (dup === 'skip') return finish(j, null, 'Already on your shelf, so it was skipped', folder);
-            if (dup === 'both') folder = numberedPath(folder, exists);
-            if (dup === 'replace') await fsp.rm(folder, { recursive: true, force: true });
+            if (dup === 'both' || filing.has(folder)) folder = numberedPath(folder, taken);
         }
-        const tpl = templateFor(j.kind);
-        for (let i = 0; i < audio.length; i++) {
-            const ext = audio[i].match(/\.([a-z0-9]+)$/i)[1].toLowerCase();
-            const name = rename ? applyTemplate(tpl, { ...book, track: i + 1, trackCount: audio.length, ext }).split('/').pop() : path.relative(srcRoot, audio[i]);
-            const target = inside(folder, name);
-            await place(audio[i], target, copy);
-            placed.push(target);
-        }
-        const cover = files.find(f => IMAGE_EXT.test(f));
-        if (cover) await place(cover, path.join(folder, 'cover' + path.extname(cover).toLowerCase().replace('jpeg', 'jpg')), copy).catch(() => {});
-        else if (/^https?:\/\//.test(j.coverUrl || '')) await saveCover(j.coverUrl, path.join(folder, 'cover.jpg')).catch(() => {});
+        filing.add(folder);
+        // Built under a temporary name and renamed when complete, so a folder cut short never passes for the book.
+        const building = folder + '.incoming';
+        try {
+            await fsp.rm(building, { recursive: true, force: true });
+            const tpl = templateFor(j.kind);
+            for (let i = 0; i < audio.length; i++) {
+                const ext = audio[i].match(/\.([a-z0-9]+)$/i)[1].toLowerCase();
+                const name = rename ? applyTemplate(tpl, { ...book, track: i + 1, trackCount: audio.length, ext }).split('/').pop() : path.relative(srcRoot, audio[i]);
+                const target = inside(building, name);
+                await place(audio[i], target, copy);
+                placed.push(path.join(folder, path.relative(building, target)));
+            }
+            const cover = files.find(f => IMAGE_EXT.test(f));
+            if (cover) await place(cover, path.join(building, 'cover' + path.extname(cover).toLowerCase().replace('jpeg', 'jpg')), copy).catch(() => {});
+            else if (/^https?:\/\//.test(j.coverUrl || '')) await saveCover(j.coverUrl, path.join(building, 'cover.jpg')).catch(() => {});
+            if (exists(folder)) await fsp.rm(folder, { recursive: true, force: true }); // "Replace it"
+            await fsp.rename(building, folder);
+        } catch (e) { await fsp.rm(building, { recursive: true, force: true }); throw e; }
+        finally { filing.delete(folder); }
         j.format = (audio[0].match(/\.([a-z0-9]+)$/i)[1] || '').toLowerCase();
         mainPath = folder;
         j.tracks = audio.length;

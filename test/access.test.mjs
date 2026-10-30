@@ -104,6 +104,30 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     settings.qbit.directSlots = 2;
     console.log('forget stops downloads: ok');
 }
+// Two downloads at once never land on the same file.
+{
+    const { settings } = await import('../src/config.js');
+    const jobs = await import('../src/jobs.js');
+    const { registerResult } = await import('../src/sources.js');
+    settings.qbit.directSlots = 0;
+    const admin = { role: 'admin' };
+    const r = { title: 'Twice', author: 'T', format: 'epub', source: 'Test', directUrl: 'https://files.example/t.epub' };
+    registerResult(r, 'ebooks');
+    const [x, y] = await Promise.all([jobs.startDownload(r.id, '', admin), jobs.startDownload(r.id, '', admin)]);
+    assert.equal(x.id, y.id, 'a double click starts one download');
+    jobs.forget(x.id, admin);
+    settings.qbit.directSlots = 2;
+
+    const tmp = fs.mkdtempSync(path.join(root, 'filing-'));
+    const job = n => ({ id: 'race' + n, kind: 'ebook', title: 'Race', author: 'R', format: 'epub', how: 'direct', owners: [] });
+    const part = n => { const f = path.join(tmp, n + '.part'); fs.writeFileSync(f, String(n).repeat(500)); return f; };
+    settings.shelves.duplicate = 'both';
+    await Promise.all([jobs.fileIt(job(1), [part(1)]), jobs.fileIt(job(2), [part(2)])]);
+    const filed = fs.readdirSync(path.join(settings.shelves.ebookDir, 'R')).filter(f => f.startsWith('Race'));
+    assert.equal(filed.length, 2, '"keep both" keeps both, not one written over the other: ' + filed);
+    settings.shelves.duplicate = 'skip';
+    console.log('downloads never share a file: ok');
+}
 
 // ── Part 2: every route, per mode and role ───────────────────────────────────
 // seed: a settings.json to start from; setup: false leaves first-run setup undone.
