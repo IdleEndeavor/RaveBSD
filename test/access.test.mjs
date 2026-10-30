@@ -129,6 +129,18 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     console.log('downloads never share a file: ok');
 }
 
+// Checks run from timers never reject: a rejection nobody catches would stop the server.
+{
+    const { settings } = await import('../src/config.js');
+    const jobs = await import('../src/jobs.js');
+    const boom = () => { throw new Error('listener failed'); };
+    jobs.events.on('event', boom);
+    settings.storage.lowSpaceGB = 1e9; // every disk is "low", so it announces
+    const warn = console.warn; console.warn = () => {};
+    try { await jobs.checkSpace(); } finally { console.warn = warn; jobs.events.off('event', boom); settings.storage.lowSpaceGB = 5; }
+    console.log('timer checks never reject: ok');
+}
+
 // ── Part 2: every route, per mode and role ───────────────────────────────────
 // seed: a settings.json to start from; setup: false leaves first-run setup undone.
 async function start(mode, { name = mode, env: extra = {}, seed, setup: doSetup = true } = {}) {

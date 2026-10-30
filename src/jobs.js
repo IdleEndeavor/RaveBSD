@@ -620,6 +620,9 @@ export async function freeSpace(dir) {
 
 export let lowSpace = false;
 export async function checkSpace() {
+    try { await measureSpace(); } catch (e) { console.warn('Checking free space failed: ' + e.message); } // called without waiting
+}
+async function measureSpace() {
     const limit = settings.storage.lowSpaceGB * 1e9;
     const [a, b] = limit ? await Promise.all([freeSpace(dirFor('ebook')), freeSpace(dirFor('audiobook'))]) : [{}, {}];
     const low = !!limit && !!((a.total && a.free < limit) || (b.total && b.free < limit));
@@ -652,9 +655,12 @@ export async function tidy(now = Date.now()) {
     if (changed) { shelfKeys = onShelfKeys(); save(); emit('shelf', {}); }
 }
 
-setInterval(() => { checkMoved(); checkSpace(); }, 60e3).unref();
-setInterval(tidy, 3600e3).unref();
-setTimeout(() => { checkMoved(); checkSpace(); tidy(); }, 2000).unref();
+// A timer's error is logged: thrown or rejected from a timer, it would stop the whole server.
+const tidyNow = () => tidy().catch(e => console.warn('Tidying the shelf failed: ' + e.message));
+const checkFiles = () => { try { checkMoved(); } catch (e) { console.warn('Checking the shelf files failed: ' + e.message); } checkSpace(); };
+setInterval(checkFiles, 60e3).unref();
+setInterval(tidyNow, 3600e3).unref();
+setTimeout(() => { checkFiles(); tidyNow(); }, 2000).unref();
 
 // Sizes on the shelf per kind, for the Stats storage card.
 export function shelfBytes() {
