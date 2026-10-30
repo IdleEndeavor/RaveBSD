@@ -142,7 +142,8 @@ function advPanel(phone) {
     const chips = m => `<div class="chips" data-fmt="${m}" role="group" aria-label="Formats"${m !== S.mode ? ' hidden' : ''}>
         <button type="button" class="fchip" data-act="chip" data-any aria-pressed="${!(a.formats || []).length}">Any</button>
         ${FORMATS[m].map(f => `<button type="button" class="fchip" data-act="chip" data-v="${f}" aria-pressed="${(a.formats || []).includes(f)}">${f.toUpperCase()}</button>`).join('')}</div>`;
-    const langs = ['Any language', 'English', 'Spanish', 'French', 'German', 'Japanese'];
+    // Every language the server's filter knows (LANGS in src/sources.js; npm test checks the two match).
+    const langs = ['Any language', 'English', 'Spanish', 'French', 'German', 'Italian', 'Portuguese', 'Russian', 'Japanese', 'Chinese', 'Dutch', 'Polish'];
     return `<div class="adv${phone ? ' sheet' : ''}" id="adv" role="${phone ? 'dialog' : 'region'}" aria-label="Advanced search" hidden>
         <div class="adv-head"><span class="adv-t">Advanced search</span>${phone ? `<button type="button" class="adv-x" data-act="adv" aria-label="Close advanced search">${icon('x', 20, 2.4)}</button>` : '<span class="adv-s">Fill in what you know. Empty boxes are ignored.</span>'}</div>
         <div class="adv-body">
@@ -188,7 +189,7 @@ function searchUrl(q, mode, adv) {
         if (from) p.set('year', from === to ? from : `${from}-${to}`);
         // With an author too, the title alone is what the libraries are asked again with and judged against.
         if (adv.title && adv.author) p.set('title', adv.title);
-        if (adv.lang) p.set('lang', adv.lang.slice(0, 2).toLowerCase() === 'ja' ? 'ja' : adv.lang.toLowerCase());
+        if (adv.lang) p.set('lang', adv.lang.toLowerCase());
     }
     return '/search/all?' + p;
 }

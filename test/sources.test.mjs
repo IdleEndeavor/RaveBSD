@@ -5,6 +5,9 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import worker, { parseFilesizeBytes, royallibUnitChar, get, withDeadline, withEdgeCache, rankMirrors, fetchFirstValid, scoreResult, tokenCoverage, currentUA, setUserAgentMode, BROWSER_UA, RAVE_UA, parseOpts, relevance, relevanceBand, interleaveGroups, isbnOf, libgenSearchParams } from '../src/sources.js';
 
+import fs from 'node:fs';
+import { LANGS, langOf } from '../src/sources.js';
+
 // parseFilesizeBytes: LibGen, Anna's and AudiobookBay each write the size unit differently.
 {
     // LibGen: single lowercase letter, e.g. '5.2', 'm'
@@ -143,6 +146,15 @@ console.log('sources.js module shape: ok');
     assert.equal(parseOpts(new URL('http://x/?year=abc')).yearFrom, 0);
     assert.deepEqual(parseOpts(new URL('http://x/')), { formats: [], sources: [], yearFrom: 0, yearTo: 0, lang: '', title: '' });
     console.log('parseOpts: ok');
+}
+
+// The Language menu in advanced search offers every language the server's filter knows, and each name it
+// sends maps to that language (search.js sends the name in lower case).
+{
+    const src = fs.readFileSync(new URL('../public/js/search.js', import.meta.url), 'utf8');
+    const names = JSON.parse(src.match(/const langs = (\[[^\]]*\]);/)[1].replace(/'/g, '"')).slice(1);
+    assert.deepEqual(names.map(n => langOf(n.toLowerCase())).sort(), Object.keys(LANGS).sort());
+    console.log('language menu: ok');
 }
 
 // Relevance: small words don't count, accents and plurals fold, unrelated results score 0.
