@@ -5,7 +5,7 @@ import dns from 'node:dns/promises';
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
-import { Readable } from 'node:stream';
+import { PassThrough, Readable } from 'node:stream';
 import zlib from 'node:zlib';
 
 function v4Private(ip) {
@@ -54,6 +54,11 @@ export async function assertPublicUrl(url) {
 // checked is the one connected to, so a DNS server answering differently a second time cannot slip in a private one.
 // No redirects followed. Network errors look like fetch()'s (TypeError, cause.code), an abort rejects with its reason.
 const UNZIP = { gzip: zlib.createGunzip, 'x-gzip': zlib.createGunzip, deflate: zlib.createInflate, br: zlib.createBrotliDecompress };
+// Content-Encoding lists the codings in the order they were applied; one this does not know leaves the body as sent.
+function decoders(header) {
+    const codings = String(header || '').toLowerCase().split(',').map(x => x.trim()).filter(x => x && x !== 'identity');
+    return codings.every(c => UNZIP[c]) ? codings.reverse().map(c => UNZIP[c]()) : [];
+}
 export function pinnedFetch(url, init = {}, allow = ip => !isPrivateIp(ip)) {
     const u = new URL(url), { signal } = init;
     if (!/^https?:$/.test(u.protocol)) return Promise.reject(new Error('Not a web link'));
@@ -72,16 +77,24 @@ export function pinnedFetch(url, init = {}, allow = ip => !isPrivateIp(ip)) {
         const onAbort = () => { req.destroy(signal.reason); if (res) res.destroy(signal.reason); };
         const req = (u.protocol === 'https:' ? https : http).request(u, { method: init.method || 'GET', headers, lookup }, r => {
             res = r;
-            const hdrs = new Headers();
-            for (let i = 0; i < r.rawHeaders.length; i += 2) hdrs.append(r.rawHeaders[i], r.rawHeaders[i + 1]);
-            const empty = init.method === 'HEAD' || r.statusCode === 204 || r.statusCode === 304;
-            const unzip = UNZIP[String(r.headers['content-encoding'] || '').trim().toLowerCase()];
-            let body = r;
-            if (unzip && !empty) { body = unzip(); r.on('error', e => body.destroy(e)).pipe(body); body.on('close', () => r.destroy()); }
             r.on('close', () => signal && signal.removeEventListener('abort', onAbort));
-            if (empty) r.resume();
-            resolve(new Response(empty ? null : Readable.toWeb(body), { status: r.statusCode, statusText: r.statusMessage, headers: hdrs }));
+            // Whatever a site answers ends in a Response or a rejection, never in an exception that takes the server down.
+            try {
+                if (r.statusCode < 200 || r.statusCode > 599) throw new Error('Unexpected status ' + r.statusCode);
+                const hdrs = new Headers();
+                for (let i = 0; i < r.rawHeaders.length; i += 2) hdrs.append(r.rawHeaders[i], r.rawHeaders[i + 1]);
+                if (init.method === 'HEAD' || [204, 205, 304].includes(r.statusCode)) { r.resume(); return resolve(new Response(null, { status: r.statusCode, statusText: r.statusMessage, headers: hdrs })); }
+                // The body passes through here so a connection dropped mid-way rejects like fetch()'s (TypeError, cause).
+                const steps = [new PassThrough(), ...decoders(r.headers['content-encoding'])];
+                const body = steps[steps.length - 1];
+                for (let i = 1; i < steps.length; i++) steps[i - 1].on('error', e => body.destroy(e)).pipe(steps[i]);
+                r.on('error', e => body.destroy(signal && signal.aborted ? signal.reason : new TypeError('terminated', { cause: e }))).pipe(steps[0]);
+                body.on('close', () => r.destroy());
+                resolve(new Response(Readable.toWeb(body), { status: r.statusCode, statusText: r.statusMessage, headers: hdrs }));
+            } catch (e) { r.destroy(); reject(new TypeError('fetch failed', { cause: e })); }
         });
+        // fetch() does not switch protocols either.
+        req.on('upgrade', (r, socket) => { socket.destroy(); reject(new TypeError('fetch failed', { cause: new Error('Unexpected protocol switch') })); });
         req.on('error', e => {
             if (signal) signal.removeEventListener('abort', onAbort);
             reject(signal && signal.aborted ? signal.reason : e.message === refused().message ? e : new TypeError('fetch failed', { cause: e }));

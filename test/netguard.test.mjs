@@ -57,6 +57,23 @@ console.log('netguard: ok');
     ctrl.abort(new Error('The site stopped sending'));
     await assert.rejects(reader.read(), /stopped sending/, 'an abort mid-body rejects with its reason');
     await assert.rejects(pinnedFetch(base + '/', { signal: AbortSignal.abort(new Error('gone')) }, any), /gone/);
+    // What a hostile site can answer: odd statuses, a protocol switch, a connection cut mid-body, stacked codings.
+    const net = await import('node:net');
+    const raw = net.createServer(sock => sock.once('data', d => {
+        const path = String(d).split(' ')[1];
+        if (path === '/cut') { sock.write('HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nabc'); return setTimeout(() => sock.destroy(), 50); }
+        if (path === '/stack') { const b = zlib.gzipSync(zlib.brotliCompressSync('two')); sock.write(`HTTP/1.1 200 OK\r\nContent-Encoding: br, gzip\r\nContent-Length: ${b.length}\r\n\r\n`); return sock.end(b); }
+        sock.end({ '/205': 'HTTP/1.1 205 Reset\r\nContent-Length: 2\r\n\r\nhi', '/999': 'HTTP/1.1 999 X\r\nContent-Length: 0\r\n\r\n', '/101': 'HTTP/1.1 101 Switching Protocols\r\nUpgrade: x\r\nConnection: Upgrade\r\n\r\n' }[path]);
+    }));
+    await new Promise(ok => raw.listen(0, '127.0.0.1', ok));
+    const rb = `http://localhost:${raw.address().port}`;
+    assert.equal((await pinnedFetch(rb + '/205', {}, any)).body, null, '205 has no body');
+    await assert.rejects(pinnedFetch(rb + '/999', {}, any), TypeError, 'a status out of range is a failed fetch, not a crash');
+    await assert.rejects(pinnedFetch(rb + '/101', { signal: AbortSignal.timeout(2000) }, any), e => e instanceof TypeError, 'a protocol switch fails');
+    const cut = await pinnedFetch(rb + '/cut', {}, any);
+    await assert.rejects(cut.text(), e => e instanceof TypeError && !!e.cause, 'a cut connection rejects like fetch()');
+    assert.equal(await (await pinnedFetch(rb + '/stack', {}, any)).text(), 'two', 'stacked codings are undone in order');
+    raw.close();
     server.close();
     await assert.rejects(pinnedFetch(base + '/', {}, any), e => e instanceof TypeError && !!e.cause.code, 'network errors look like fetch()\'s');
     console.log('netguard pinned fetch: ok');
