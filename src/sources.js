@@ -21,10 +21,9 @@
 //   2. A result has: title, author, year, format, filesize (bytes), language, source (display name),
 //      downloadUrl, coverUrl. Optional: directUrl (a real file link), pageUrl (the source's own page, when
 //      downloadUrl is the file itself), magnet, infoHash, md5.
-//   3. If the real file link needs another request, add a case to resolveOne() so the page can fetch it later.
-//   4. Add it to runFullSearch() and its meta counts, to LIBRARIES in src/server.js (name and which searches it
-//      answers), to LIBS in public/js/search.js (loading bar label) and SRC_INFO in public/js/settings.js.
-//      If its file links come later, add its display name to RESOLVABLE. Add a test for any parsing you wrote.
+//   3. Add one entry to SOURCES (see "Source registry"): its search, and resolve/resolveOne if its real file
+//      links need another request. Searches, counts, /search/<id>, /resolve, the admin panel and the page's
+//      labels all read it. Add a test for any parsing you wrote.
 // Search results never leave this server as links to fetch: downloads go by result id (src/jobs.js).
 
 import { browserGet, browserFetch, browserAvailable, verifyWindowOpen } from './browser.js';
@@ -1637,6 +1636,84 @@ async function searchMobilism(query, mode) {
     } catch (e) { return unavailable(); }
 }
 
+// ── Source registry ─────────────────────────────────────────────────────────
+// Every library, once. Searches, counts, per-source routes, /resolve, the admin panel's list and the page's
+// labels all come from here.
+//   id          route (/search/<id>), settings key (sources.off) and meta key
+//   name        as the page shows it; source: the `source` field its results carry
+//   kinds       the searches it answers; applies(): false while it needs setting up (a login)
+//   info, colour  what it has, for the admin panel's list
+//   search(q, mode)        its results
+//   resolve(rs, mode, n)   direct links for the first n results, filled in place (may return the ones to keep)
+//   resolveOne(r, mode)    the direct link for one result, when the page asks (/resolve)
+//   map(rs)                turns its raw results into results, after resolve
+export const SOURCES = [
+    { id: 'libgen', name: 'LibGen', source: 'Library Genesis', kinds: ['ebooks', 'audiobooks'], info: 'eBooks · mirrors tried in order', colour: '#FF8A65',
+        // LibGen has no audiobook section: in audiobook mode only actual audio files it happens to hold count.
+        search: (q, mode) => searchLibgen(q, mode).then(rs => mode === 'audiobooks' ? rs.filter(r => IA_AUDIO_EXTS.includes(String(r.format).toLowerCase())) : rs),
+        resolve: (rs, mode, n) => resolveLibgenLinks(rs, n),
+        resolveOne: r => r.md5 && resolveLibgenLinks([r], 1) },
+    { id: 'annas', name: "Anna's Archive", source: "Anna's Archive", kinds: ['ebooks'],
+        // Its `ext` filter has no audio values, so an audiobook search would only return ebooks.
+        search: async (q, mode) => (mode === 'audiobooks' ? [] : searchAnnas(q, mode)),
+        // Most Anna's files are also on LibGen, which has instant links.
+        resolveOne: async r => {
+            if (!r.md5) return;
+            const t = { md5: r.md5 };
+            await resolveLibgenLinks([t], 1);
+            if (t.directUrl) { r.directUrl = t.directUrl; r.directFrom = 'LibGen'; }
+        } },
+    { id: 'archive', name: 'Internet Archive', source: 'Internet Archive', kinds: ['ebooks', 'audiobooks'], info: 'eBooks and audiobooks · lending items left out', colour: '#8FD0FF',
+        search: (q, mode) => searchArchive(q, mode),
+        resolve: (rs, mode, n) => resolveArchiveLinks(rs, mode, n),
+        resolveOne: (r, mode) => resolveArchiveLinks([r], mode, 1) },
+    { id: 'gutenberg', name: 'Project Gutenberg', source: 'Project Gutenberg', kinds: ['ebooks'], info: 'eBooks · public domain', colour: '#FFD54A',
+        search: (q, mode) => searchGutenberg(q, mode) },
+    { id: 'openstax', name: 'OpenStax', source: 'OpenStax', kinds: ['ebooks'], info: 'Free textbooks', colour: '#B7A4FF',
+        search: (q, mode) => searchOpenStax(q, mode) },
+    { id: 'libretexts', name: 'LibreTexts', source: 'LibreTexts', kinds: ['ebooks'], info: 'Free textbooks and course pages', colour: '#A8F0FF',
+        search: (q, mode) => searchLibreTexts(q, mode) },
+    { id: 'memoryoftheworld', name: 'Memory of the World', source: 'Memory of the World', kinds: ['ebooks'], info: 'eBooks', colour: '#FF9FE8',
+        search: (q, mode) => searchMemoryOfTheWorld(q, mode) },
+    { id: 'royallib', name: 'RoyalLib', source: 'RoyalLib', kinds: ['ebooks'], info: 'eBooks', colour: '#FFC070',
+        search: (q, mode) => searchRoyalLib(q, mode),
+        resolve: (rs, mode, n) => resolveRoyalLibLinks(rs, n),
+        resolveOne: r => resolveRoyalLibLinks([r], 1) },
+    { id: 'zlibrary', name: 'Z-Library', source: 'Z-Library', kinds: ['ebooks'],
+        search: (q, mode) => searchZlibrary(q, mode) },
+    { id: 'mobilism', name: 'Mobilism', source: 'Mobilism', kinds: ['ebooks', 'audiobooks'], applies: () => mobilismConfigured(),
+        search: (q, mode) => searchMobilism(q, mode) },
+    { id: 'audiobookbay', name: 'AudiobookBay', source: 'AudiobookBay', kinds: ['audiobooks'], info: 'Audiobooks · magnet links', colour: '#2EE6F6',
+        search: q => searchAudiobookBay(q),
+        // Fills in the raw results' magnets; returns only those that got one.
+        resolve: rs => resolveAbbMagnets(rs),
+        map: rs => mapAbbResults(rs),
+        resolveOne: async r => {
+            const raw = { ...r, detailUrl: r.detailUrl || r.downloadUrl };
+            await resolveAbbMagnets([raw], 1);
+            if (raw.magnet) { r.magnet = raw.magnet; r.infoHash = raw.infoHash; }
+        } },
+    { id: 'librivox', name: 'LibriVox', source: 'LibriVox', kinds: ['audiobooks'], info: 'Audiobooks · volunteer recordings', colour: '#FFB4A2',
+        search: (q, mode) => searchLibriVox(q, mode) },
+    { id: 'audiobooksbee', name: 'AudiobooksBee', source: 'AudiobooksBee', kinds: ['audiobooks'], info: 'Audiobooks · download pages', colour: '#8FD0FF',
+        search: q => searchAudiobooksBee(q),
+        resolve: rs => resolveAudiobooksBeeLinks(rs),
+        map: rs => mapAudiobooksBeeResults(rs),
+        resolveOne: async r => {
+            const raw = { ...r, detailUrl: r.detailUrl };
+            if (!raw.detailUrl) return;
+            await resolveAudiobooksBeeLinks([raw], 1);
+            if (raw.downloadUrl) { r.downloadUrl = raw.downloadUrl; if (raw.format) r.format = raw.format; }
+        } },
+];
+const sourceById = id => SOURCES.find(s => s.id === id);
+// One source's search as /search/<id> answers it: its own results, with the first few direct links.
+async function searchOne(src, query, mode) {
+    let results = await src.search(query, mode);
+    if (src.resolve && results.length) { const kept = await src.resolve(results, mode); if (Array.isArray(kept)) results = kept; }
+    return src.map ? src.map(results) : results;
+}
+
 // ── Merge, rank, deduplicate ────────────────────────────────────────────────
 
 // Result ids and the server-side store let the page ask for one result's direct link later
@@ -1653,10 +1730,10 @@ export const setSourcesOff = list => { sourcesOff = new Set(list || []); };
 // While the VPN tunnel is down (and Settings say to stop), searches answer with this message instead.
 let searchBlocked = () => '';
 export const setSearchGate = fn => { searchBlocked = fn; };
-// Sources whose real file link is found later through /resolve.
 // How each source did in its most recent search: ok, unavailable, error or timeout. Shown in Settings.
 export const sourceHealth = {};
-export const RESOLVABLE = new Set(['Library Genesis', "Anna's Archive", 'RoyalLib', 'Internet Archive', 'AudiobookBay', 'AudiobooksBee']);
+// Sources whose real file link is found later through /resolve.
+export const RESOLVABLE = new Set(SOURCES.filter(s => s.resolveOne).map(s => s.source));
 let idSeq = 0;
 export const registerResult = (r, mode) => {
     // Links from a library's page or API become the page's links and the server's downloads: web addresses only.
@@ -1760,26 +1837,8 @@ export async function resolveOne(id) {
     if (r.directUrl || r.magnet) return decorate(r); // fresh shelf marks, job and naming, not the search's
     if (!resolving.has(id)) {
         resolving.set(id, (async () => {
-            const mode = r._mode || 'ebooks';
-            switch (r.source) {
-                case 'Library Genesis': if (r.md5) await resolveLibgenLinks([r], 1); break;
-                case "Anna's Archive": // most Anna's files are also on LibGen, which has instant links
-                    if (r.md5) { const t = { md5: r.md5 }; await resolveLibgenLinks([t], 1); if (t.directUrl) { r.directUrl = t.directUrl; r.directFrom = 'LibGen'; } }
-                    break;
-                case 'RoyalLib': await resolveRoyalLibLinks([r], 1); break;
-                case 'Internet Archive': await resolveArchiveLinks([r], mode, 1); break;
-                case 'AudiobookBay': {
-                    const raw = { ...r, detailUrl: r.detailUrl || r.downloadUrl };
-                    await resolveAbbMagnets([raw], 1);
-                    if (raw.magnet) { r.magnet = raw.magnet; r.infoHash = raw.infoHash; }
-                    break;
-                }
-                case 'AudiobooksBee': {
-                    const raw = { ...r, detailUrl: r.detailUrl };
-                    if (raw.detailUrl) { await resolveAudiobooksBeeLinks([raw], 1); if (raw.downloadUrl) { r.downloadUrl = raw.downloadUrl; if (raw.format) r.format = raw.format; } }
-                    break;
-                }
-            }
+            const src = SOURCES.find(s => s.source === r.source);
+            if (src && src.resolveOne) await src.resolveOne(r, r._mode || 'ebooks');
             resolving.delete(id);
         })().catch(() => resolving.delete(id)));
     }
@@ -1801,38 +1860,23 @@ async function runFullSearch(query, mode, resolveTopN, env, onProgress, opts) {
     // Each source is a named job, so adding or skipping one never shifts positions.
     // With advanced search the user can pick sources, and unchosen ones never run.
     const jobs = [];
-    const add = (name, applies, run) => { if (applies && !sourcesOff.has(name) && (!opts.sources.length || opts.sources.includes(name))) jobs.push({ name, fn: run, run: run(query) }); };
-    const ebooks = mode !== 'audiobooks', audio = !ebooks;
-    // LibGen has no audiobook section: in audiobook mode only actual audio files it happens to hold count.
-    add('libgen', true, q => searchLibgen(q, mode).then(rs => audio ? rs.filter(r => IA_AUDIO_EXTS.includes(String(r.format).toLowerCase())) : rs));
-    add('annas', ebooks, q => searchAnnas(q, mode));
-    add('archive', true, q => searchArchive(q, mode));
-    add('gutenberg', ebooks, q => searchGutenberg(q, mode));
-    add('openstax', ebooks, q => searchOpenStax(q, mode));
-    add('libretexts', ebooks, q => searchLibreTexts(q, mode));
-    add('memoryoftheworld', ebooks, q => searchMemoryOfTheWorld(q, mode));
-    add('royallib', ebooks, q => searchRoyalLib(q, mode));
-    add('zlibrary', ebooks, q => searchZlibrary(q, mode));
-    add('mobilism', mobilismConfigured(), q => searchMobilism(q, mode));
-    add('audiobookbay', audio, q => searchAudiobookBay(q));
-    add('librivox', audio, q => searchLibriVox(q, mode));
-    add('audiobooksbee', audio, q => searchAudiobooksBee(q));
+    for (const s of SOURCES) {
+        if (!s.kinds.includes(mode) || (s.applies && !s.applies()) || sourcesOff.has(s.id) || (opts.sources.length && !opts.sources.includes(s.id))) continue;
+        const fn = q => s.search(q, mode);
+        jobs.push({ name: s.id, fn, run: fn(query) });
+    }
 
     // Streaming callers (the page) get results as each source finishes and ask for direct links
     // afterwards through /resolve. Plain callers (the JSON API) wait for direct links before the reply.
     const streaming = !!onProgress;
-    const norm = (name, v) => name === 'audiobookbay' ? mapAbbResults(v) : name === 'audiobooksbee' ? mapAudiobooksBeeResults(v) : v;
+    const norm = (name, v) => { const s = sourceById(name); return s && s.map ? s.map(v) : v; };
     const got = {};
     let finished = false;
     const snapshot = () => mergeAndRank([].concat(...Object.values(got).map(v => v.slice())), query, mode, opts);
     // Plain callers: a source's direct links are looked up as soon as its own search answers, so they no longer
     // wait for the slowest library. resolveAbbMagnets fills in the raw AudiobookBay objects before norm().
-    const RESOLVERS = {
-        libgen: rs => resolveLibgenLinks(rs, resolveTopN), royallib: rs => resolveRoyalLibLinks(rs, resolveTopN),
-        archive: rs => resolveArchiveLinks(rs, mode, resolveTopN), audiobookbay: rs => resolveAbbMagnets(rs), audiobooksbee: rs => resolveAudiobooksBeeLinks(rs),
-    };
     const resolveJobs = [];
-    const resolveSoon = (name, v) => { if (!streaming && v.length && RESOLVERS[name]) resolveJobs.push(RESOLVERS[name](v).catch(() => {})); };
+    const resolveSoon = (name, v) => { const s = sourceById(name); if (!streaming && v.length && s && s.resolve) resolveJobs.push(s.resolve(v, mode, resolveTopN).catch(() => {})); };
 
     if (onProgress) onProgress({ sources: jobs.map(j => j.name) });
     const settled = await Promise.allSettled(jobs.map(j => {
@@ -1865,12 +1909,7 @@ async function runFullSearch(query, mode, resolveTopN, env, onProgress, opts) {
         }).catch(() => {})));
     }
     const count = n => (byName[n] || []).length;
-    const meta = () => ({
-        libgen: count('libgen'), annas: count('annas'), archive: count('archive'), gutenberg: count('gutenberg'),
-        openstax: count('openstax'), libretexts: count('libretexts'), memoryoftheworld: count('memoryoftheworld'),
-        royallib: count('royallib'), audiobookbay: count('audiobookbay'), librivox: count('librivox'),
-        audiobooksbee: count('audiobooksbee'), zlibrary: count('zlibrary'), mobilism: count('mobilism'),
-    });
+    const meta = () => Object.fromEntries(SOURCES.map(s => [s.id, count(s.id)]));
 
     if (streaming) {
         finished = true;
@@ -1939,65 +1978,8 @@ export default {
         if (blocked) return err(blocked, 503);
 
         try {
-            if (path === '/search/libgen') {
-                let results = await searchLibgen(query, mode);
-                // Only the first few results get a direct link here (resolveLibgenLinks' default).
-                // Resolving every result at once sent bursts of requests and made searches hang.
-                if (results.length > 0) await resolveLibgenLinks(results);
-                return okR(env, 'libgen', results);
-            }
-            if (path === '/search/royallib') {
-                let results = await searchRoyalLib(query, mode);
-                if (results.length > 0) await resolveRoyalLibLinks(results);
-                return okR(env, 'royallib', results);
-            }
-            // Anna's `ext` filter has no audio values, so an audiobook search would only return ebooks.
-            // Skip Anna's in audiobook mode.
-            if (path === '/search/annas') {
-                if (mode === 'audiobooks') return okR(env, 'annas', []);
-                return okR(env, 'annas', await searchAnnas(query, mode));
-            }
-
-            if (path === '/search/archive') {
-                let results = await searchArchive(query, mode);
-                if (results.length > 0) await resolveArchiveLinks(results, mode);
-                return okR(env, 'archive', results);
-            }
-
-            if (path === '/search/audiobookbay') {
-                let results = await searchAudiobookBay(query);
-                results = await resolveAbbMagnets(results);
-                return okR(env, 'audiobookbay', mapAbbResults(results));
-            }
-
-            if (path === '/search/gutenberg') {
-                return okR(env, 'gutenberg', await searchGutenberg(query, mode));
-            }
-
-            if (path === '/search/openstax') {
-                return okR(env, 'openstax', await searchOpenStax(query, mode));
-            }
-
-            if (path === '/search/libretexts') {
-                return okR(env, 'libretexts', await searchLibreTexts(query, mode));
-            }
-
-            if (path === '/search/memoryoftheworld') {
-                return okR(env, 'memoryoftheworld', await searchMemoryOfTheWorld(query, mode));
-            }
-
-            if (path === '/search/librivox') {
-                return okR(env, 'librivox', await searchLibriVox(query, mode));
-            }
-
-            if (path === '/search/audiobooksbee') {
-                let results = await searchAudiobooksBee(query);
-                results = await resolveAudiobooksBeeLinks(results);
-                return okR(env, 'audiobooksbee', mapAudiobooksBeeResults(results));
-            }
-
-            if (path === '/search/zlibrary') return okR(env, 'zlibrary', await searchZlibrary(query, mode));
-            if (path === '/search/mobilism') return okR(env, 'mobilism', await searchMobilism(query, mode));
+            const one = path.startsWith('/search/') && sourceById(path.slice(8));
+            if (one) return okR(env, one.id, await searchOne(one, query, mode));
 
             if (path === '/search/all') {
                 // stream=1 sends one JSON object per line: progress events, then a final {final: {...}} line

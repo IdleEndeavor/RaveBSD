@@ -227,3 +227,23 @@ console.log('All sources tests passed.');
     delete globalThis.caches;
     console.log('cached results stay downloadable: ok');
 }
+
+// The source registry: every library once, with what searches, /resolve and the admin panel need.
+{
+    const { SOURCES, RESOLVABLE } = await import('../src/sources.js');
+    const ids = SOURCES.map(s => s.id);
+    assert.equal(new Set(ids).size, ids.length, 'ids are unique');
+    for (const s of SOURCES) {
+        assert.match(s.id, /^[a-z]+$/, `${s.id}: the id is a route segment (/search/<id>)`);
+        assert.ok(s.name && s.source, `${s.id}: has a name and a result source`);
+        assert.ok(s.kinds.length && s.kinds.every(k => k === 'ebooks' || k === 'audiobooks'), `${s.id}: kinds`);
+        assert.equal(typeof s.search, 'function', `${s.id}: search`);
+    }
+    assert.deepEqual([...RESOLVABLE].sort(), ['AudiobookBay', 'AudiobooksBee', "Anna's Archive", 'Internet Archive', 'Library Genesis', 'RoyalLib'].sort());
+    // Asking for an unknown source, or one in a search it does not answer, never reaches a library.
+    const res = await worker.fetch(new Request('http://x/search/nosuchlibrary?q=dune'), {}, { waitUntil() {} });
+    assert.equal(res.status, 404);
+    const annas = await (await worker.fetch(new Request('http://x/search/annas?q=dune&mode=audiobooks'), {}, { waitUntil() {} })).json();
+    assert.deepEqual(annas.results, [], 'Anna\'s answers ebook searches only');
+    console.log('source registry: ok');
+}
