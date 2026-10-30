@@ -594,6 +594,7 @@ const server = http.createServer(async (req, res) => {
             settings.access.mode = mode;
             settings.setupDone = true;
             saveSettings(); applySettings();
+            dropStale();
             return send(res, 200, { ok: true }, headers);
         }
         if (!settings.setupDone && !isStaticPage(p, req) && !SETUP_OPEN.some(([re, meth]) => re.test(p) && meth === req.method)) return fail(res, 'Finish setting up RaveBSD first', 403);
@@ -624,9 +625,9 @@ const server = http.createServer(async (req, res) => {
         if (p === '/cover') return sendCover(res, url, me);
         if (p.startsWith('/browser/')) return browserRoutes(req, res, url);
         if (p.startsWith('/api/') && !p.startsWith('/api/v1/')) {
-            await api(req, res, url, me);
-            // Changes to accounts, sessions or the mode come through here; open pages catch up at once.
-            if (req.method !== 'GET') dropStale();
+            // Changes to accounts, sessions or the mode come through here; open pages catch up at once, even when
+            // the change failed halfway (a restore).
+            try { await api(req, res, url, me); } finally { if (req.method !== 'GET') dropStale(); }
             return;
         }
 
