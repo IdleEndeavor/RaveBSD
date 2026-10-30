@@ -2,7 +2,11 @@
 // one at something on the owner's own network (a router page, another container), so those fetches only go
 // to public addresses, checked again on every redirect.
 import dns from 'node:dns/promises';
+import http from 'node:http';
+import https from 'node:https';
 import net from 'node:net';
+import { Readable } from 'node:stream';
+import zlib from 'node:zlib';
 
 function v4Private(ip) {
     const [a, b] = ip.split('.').map(Number);
@@ -46,14 +50,52 @@ export async function assertPublicUrl(url) {
     if (!addrs.length || addrs.some(isPrivateIp)) throw new Error('That link points inside a private network');
 }
 
-// fetch() that follows at most 5 redirects itself, checking each address first.
-// ponytail: the name is looked up here and again by fetch, so a DNS server answering differently the second time
-// could still reach a private address; pin the checked address with an undici Agent (connect.lookup) to close it.
+// A fetch() that connects only to addresses allow() accepts. The name is looked up once and the address that was
+// checked is the one connected to, so a DNS server answering differently a second time cannot slip in a private one.
+// No redirects followed. Network errors look like fetch()'s (TypeError, cause.code), an abort rejects with its reason.
+const UNZIP = { gzip: zlib.createGunzip, 'x-gzip': zlib.createGunzip, deflate: zlib.createInflate, br: zlib.createBrotliDecompress };
+export function pinnedFetch(url, init = {}, allow = ip => !isPrivateIp(ip)) {
+    const u = new URL(url), { signal } = init;
+    if (!/^https?:$/.test(u.protocol)) return Promise.reject(new Error('Not a web link'));
+    const host = u.hostname.replace(/^\[|\]$/g, '');
+    const refused = () => new Error('That link points inside a private network');
+    // Node connects to an address literal without calling lookup, so it is judged here.
+    if (net.isIP(host) && !allow(host)) return Promise.reject(refused());
+    const lookup = (name, opts, cb) => dns.lookup(name, { all: true }).then(addrs => {
+        if (!addrs.length || addrs.some(a => !allow(a.address))) return cb(refused());
+        if (opts.all) cb(null, addrs); else cb(null, addrs[0].address, addrs[0].family);
+    }, cb);
+    const headers = { 'Accept-Encoding': 'gzip, deflate, br', ...Object.fromEntries(new Headers(init.headers)) };
+    return new Promise((resolve, reject) => {
+        if (signal && signal.aborted) return reject(signal.reason);
+        let res = null;
+        const onAbort = () => { req.destroy(signal.reason); if (res) res.destroy(signal.reason); };
+        const req = (u.protocol === 'https:' ? https : http).request(u, { method: init.method || 'GET', headers, lookup }, r => {
+            res = r;
+            const hdrs = new Headers();
+            for (let i = 0; i < r.rawHeaders.length; i += 2) hdrs.append(r.rawHeaders[i], r.rawHeaders[i + 1]);
+            const empty = init.method === 'HEAD' || r.statusCode === 204 || r.statusCode === 304;
+            const unzip = UNZIP[String(r.headers['content-encoding'] || '').trim().toLowerCase()];
+            let body = r;
+            if (unzip && !empty) { body = unzip(); r.on('error', e => body.destroy(e)).pipe(body); body.on('close', () => r.destroy()); }
+            r.on('close', () => signal && signal.removeEventListener('abort', onAbort));
+            if (empty) r.resume();
+            resolve(new Response(empty ? null : Readable.toWeb(body), { status: r.statusCode, statusText: r.statusMessage, headers: hdrs }));
+        });
+        req.on('error', e => {
+            if (signal) signal.removeEventListener('abort', onAbort);
+            reject(signal && signal.aborted ? signal.reason : e.message === refused().message ? e : new TypeError('fetch failed', { cause: e }));
+        });
+        if (signal) signal.addEventListener('abort', onAbort, { once: true });
+        req.end(init.body);
+    });
+}
+
+// Follows at most 5 redirects itself, checking each address first.
 export async function fetchPublic(url, init = {}) {
     let current = url;
     for (let hop = 0; hop <= 5; hop++) {
-        await assertPublicUrl(current);
-        const res = await fetch(current, { ...init, redirect: 'manual' });
+        const res = await pinnedFetch(current, { ...init, redirect: 'manual' });
         if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
             current = new URL(res.headers.get('location'), current).href;
             if (res.body) res.body.cancel().catch(() => {});

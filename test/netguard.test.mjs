@@ -8,6 +8,60 @@ await assert.rejects(assertPublicUrl('http://localhost/'));
 await assert.rejects(assertPublicUrl('file:///etc/passwd'));
 console.log('netguard: ok');
 
+// The address checked is the one connected to: a name that answers a public address and then a private one (DNS
+// rebinding) never reaches the private one. 192.0.2.1 is public as far as the check knows, and goes nowhere.
+{
+    const http = await import('node:http');
+    const zlib = await import('node:zlib');
+    const dns = (await import('node:dns/promises')).default;
+    const { fetchPublic, pinnedFetch } = await import('../src/netguard.js');
+    let hits = 0;
+    const server = http.createServer((req, res) => {
+        hits++;
+        if (req.url === '/gz') { res.writeHead(200, { 'Content-Encoding': 'gzip', 'Set-Cookie': ['a=1', 'b=2'] }); return res.end(zlib.gzipSync('hello')); }
+        if (req.url === '/moved') { res.writeHead(302, { Location: '/gz' }); return res.end('elsewhere'); }
+        if (req.url === '/empty') { res.writeHead(204); return res.end(); }
+        if (req.url === '/slow') { res.writeHead(200); res.write('a'); return; }
+        res.end('ok');
+    });
+    await new Promise(ok => server.listen(0, '127.0.0.1', ok));
+    const port = server.address().port;
+
+    const real = dns.lookup;
+    let lookups = 0;
+    dns.lookup = async () => (++lookups === 1 ? [{ address: '192.0.2.1', family: 4 }] : [{ address: '127.0.0.1', family: 4 }]);
+    await assert.rejects(fetchPublic(`http://localhost:${port}/`, { signal: AbortSignal.timeout(500) }));
+    dns.lookup = real;
+    assert.equal(hits, 0, 'a name that changes its answer never reaches the private address');
+    assert.equal(lookups, 1, 'the name is looked up once');
+
+    await assert.rejects(fetchPublic(`http://localhost:${port}/`), /private network/);
+    await assert.rejects(fetchPublic(`http://127.0.0.1:${port}/`), /private network/);
+    await assert.rejects(fetchPublic(`http://[::ffff:127.0.0.1]:${port}/`), /private network/);
+    assert.equal(hits, 0, 'private names and addresses are refused before connecting');
+
+    // The same client with every address allowed, for what it does besides checking.
+    const any = () => true, base = `http://localhost:${port}`;
+    const gz = await pinnedFetch(base + '/gz', { headers: { 'User-Agent': 'test' } }, any);
+    assert.equal(gz.status, 200);
+    assert.equal(await gz.text(), 'hello', 'compressed answers come out plain');
+    assert.deepEqual(gz.headers.getSetCookie(), ['a=1', 'b=2']);
+    const moved = await pinnedFetch(base + '/moved', {}, any);
+    assert.equal(moved.status, 302, 'redirects are left to fetchPublic');
+    assert.equal(moved.headers.get('location'), '/gz');
+    await moved.body.cancel();
+    assert.equal((await pinnedFetch(base + '/empty', {}, any)).body, null);
+    const ctrl = new AbortController(), slow = await pinnedFetch(base + '/slow', { signal: ctrl.signal }, any);
+    const reader = slow.body.getReader();
+    await reader.read();
+    ctrl.abort(new Error('The site stopped sending'));
+    await assert.rejects(reader.read(), /stopped sending/, 'an abort mid-body rejects with its reason');
+    await assert.rejects(pinnedFetch(base + '/', { signal: AbortSignal.abort(new Error('gone')) }, any), /gone/);
+    server.close();
+    await assert.rejects(pinnedFetch(base + '/', {}, any), e => e instanceof TypeError && !!e.cause.code, 'network errors look like fetch()\'s');
+    console.log('netguard pinned fetch: ok');
+}
+
 // IPv6 spellings of private IPv4 addresses (as new URL() writes them) are private too.
 {
     const { isPrivateIp: priv } = await import('../src/netguard.js');
