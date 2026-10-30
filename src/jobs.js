@@ -342,23 +342,27 @@ async function runDirect(j) {
 // ── qBittorrent ──────────────────────────────────────────────────────────────
 async function addToQbit(j) {
     try {
-        await qbit.addMagnet(j.link);
+        // One qBittorrent already has (handed over before a restart, or added by hand) is followed, not added again.
+        if (!(j.hash && await qbit.torrentInfo(j.hash))) await qbit.addMagnet(j.link);
         j.state = 'downloading'; j.addedToQbit = Date.now();
         save(); announceJobs();
         watchTorrents();
     } catch (e) { fail(j, e.cause && e.cause.code ? 'Could not reach qBittorrent' : e.message); }
 }
 
-let watching = null;
+let watching = null, round = false;
 function watchTorrents() {
     if (watching) return;
     watching = setInterval(async () => {
+        // A round slower than the interval (a slow qBittorrent, a big copy) is not joined by the next one.
+        if (round) return;
         const list = shelf.jobs.filter(j => j.how === 'qbit' && j.state === 'downloading');
         if (!list.length) { clearInterval(watching); watching = null; return; }
-        for (const j of list) {
+        round = true;
+        try { for (const j of list) {
             try {
                 const t = await qbit.torrentInfo(j.hash);
-                if (!shelf.jobs.includes(j)) continue; // cancelled or forgotten meanwhile
+                if (!shelf.jobs.includes(j) || j.state !== 'downloading') continue; // cancelled or forgotten meanwhile
                 delete j.qbitError;
                 if (!t) { if (Date.now() - (j.addedToQbit || 0) > 120e3) fail(j, 'qBittorrent lost this torrent'); continue; }
                 j.progress = Math.min(1, t.progress || 0); j.speed = t.dlspeed || 0; j.peers = (t.num_seeds || 0) + (t.num_leechs || 0);
@@ -367,10 +371,14 @@ function watchTorrents() {
                 if (vid && j.total > quota() - visitorUsage(vid, j)) { await qbit.removeTorrent(j.hash, true).catch(() => {}); fail(j, `That would go over your space here (${mb(quota())} each)`); continue; }
                 if (qbit.isComplete(t)) { j.state = 'renaming'; announceJobs(); await finishTorrent(j, t); }
             } catch (e) { j.qbitError = 'Could not reach qBittorrent'; }
-        }
+        } } finally { round = false; }
         announceJobsSoon();
     }, 3000);
 }
+// After a restart, torrents carry on: qBittorrent kept going. One caught being handed over is handed over again
+// (or found there), and one caught being filed is filed again once the watcher sees it complete.
+for (const j of shelf.jobs) if (j.how === 'qbit' && j.state === 'renaming') j.state = 'downloading';
+for (const j of shelf.jobs) if (j.how === 'qbit' && j.state === 'queued') addToQbit(j);
 if (shelf.jobs.some(j => j.how === 'qbit' && j.state === 'downloading')) watchTorrents();
 
 async function finishTorrent(j, t) {
