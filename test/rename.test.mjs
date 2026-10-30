@@ -35,4 +35,12 @@ assert.equal(primaryAuthor('Tolkien, J. R. R. (John Ronald Reuel), 1892-1973'), 
 assert.equal(primaryAuthor('J. R. R. Tolkien, John Ronald Reuel Tolkien'), 'J. R. R. Tolkien');
 const long = applyTemplate('{title}.{ext}', { title: 'A'.repeat(200), ext: 'epub' });
 assert.ok(long.endsWith('.epub') && long.length <= 120);
+// File systems count bytes (255 at most), not characters: a long title in Chinese is cut by its bytes, and
+// never inside a character.
+const bytes = s => new TextEncoder().encode(s).length;
+const cjk = applyTemplate('{title}.{ext}', { title: '書'.repeat(150), ext: 'epub' });
+assert.ok(cjk.endsWith('.epub') && bytes(cjk) <= 200, 'cut by bytes: ' + bytes(cjk));
+const emoji = safeSegment('x' + '😀'.repeat(150));
+assert.ok(bytes(emoji) <= 200 && !/[\ud800-\udfff]/u.test(emoji.replace(/\p{Extended_Pictographic}/gu, '')), 'no half emoji');
+assert.equal([...emoji].every(c => c === 'x' || c === '😀'), true);
 console.log('rename: ok');

@@ -32,6 +32,17 @@ export function primaryAuthor(s) {
     return parts[0] || '';
 }
 
+// File systems limit a name to 255 bytes, not characters: a title in Chinese takes three bytes a character. Names
+// are cut to 120 characters and 200 bytes (room for " (2)" and a temporary suffix), never inside a character.
+const MAX_CHARS = 120, MAX_BYTES = 200;
+const utf8 = cp => (cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4);
+const byteLength = s => { let n = 0; for (const ch of s) n += utf8(ch.codePointAt(0)); return n; };
+function cut(s, chars, bytes) {
+    let out = '', n = 0, k = 0;
+    for (const ch of s) { n += utf8(ch.codePointAt(0)); if (++k > chars || n > bytes) break; out += ch; }
+    return out;
+}
+
 // One path segment from a value scraped off the internet: no slashes (so "../" can never climb out of the
 // shelf folder), no characters Windows, macOS or Linux refuse, no leading dots, and not too long.
 export function safeSegment(s) {
@@ -43,7 +54,7 @@ export function safeSegment(s) {
         .trim()
         .replace(/^[.\-\s]+/, '')
         .replace(/[. ]+$/, '');
-    return out.slice(0, 120).trim();
+    return cut(out, MAX_CHARS, MAX_BYTES).trim();
 }
 
 // Removes what an empty token leaves behind in one segment: "()", "[]", " - " at either end or doubled.
@@ -85,7 +96,7 @@ export function applyTemplate(template, book, { tidy = true } = {}) {
         if (/^\.[a-z0-9]+$/i.test(c)) c = 'Untitled' + c;
         // Long names are cut, but the extension always survives.
         const ext = (c.match(/(\.[a-z0-9]{1,6})$/i) || [''])[0];
-        if (ext && c.length > 120) return safeSegment(c.slice(0, -ext.length)).slice(0, 120 - ext.length).trim() + ext;
+        if (ext && ([...c].length > MAX_CHARS || byteLength(c) > MAX_BYTES)) return cut(safeSegment(c.slice(0, -ext.length)), MAX_CHARS - ext.length, MAX_BYTES - ext.length).trim() + ext;
         return safeSegment(c);
     }).filter(Boolean);
     return segs.join('/');
