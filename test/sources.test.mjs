@@ -3,7 +3,7 @@
 // Each block tests one helper. When you add parsing or ranking code, add a block here.
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import worker, { parseFilesizeBytes, royallibUnitChar, get, withDeadline, withEdgeCache, rankMirrors, fetchFirstValid, scoreResult, tokenCoverage, currentUA, setUserAgentMode, BROWSER_UA, RAVE_UA, parseOpts, relevance, relevanceBand, interleaveGroups, isbnOf, libgenSearchParams, getResult } from '../src/sources.js';
+import worker, { parseFilesizeBytes, royallibUnitChar, get, withDeadline, withEdgeCache, rankMirrors, fetchFirstValid, scoreResult, tokenCoverage, currentUA, setUserAgentMode, BROWSER_UA, RAVE_UA, parseOpts, relevance, relevanceBand, interleaveGroups, isbnOf, libgenSearchParams, getResult, strip, titleRetryMs } from '../src/sources.js';
 
 import fs from 'node:fs';
 import { LANGS, langOf } from '../src/sources.js';
@@ -226,4 +226,36 @@ console.log('All sources tests passed.');
     }
     delete globalThis.caches;
     console.log('cached results stay downloadable: ok');
+}
+
+// Accents never decide a match: scoring folds them like relevance does.
+{
+    const r = { title: 'Cien años de soledad', author: 'Gabriel García Márquez', format: 'epub' };
+    assert.equal(scoreResult(r, 'cien anos de soledad'), scoreResult(r, 'cien años de soledad'), 'the exact-title bonus ignores accents');
+    assert.equal(tokenCoverage(r, 'soledad garcia marquez'), 1);
+    console.log('accent-blind scoring: ok');
+}
+
+// The language filter keeps letters outside ASCII and regional codes.
+{
+    assert.equal(parseOpts(new URL('http://x/?q=a&lang=Español')).lang, 'español');
+    assert.equal(parseOpts(new URL('http://x/?q=a&lang=pt-BR')).lang, 'pt-br');
+    assert.equal(parseOpts(new URL('http://x/?q=a&lang=en<script>')).lang, 'enscript');
+    console.log('parseOpts lang: ok');
+}
+
+// strip(): numeric entities beyond the first 65536 characters, and hex ones.
+{
+    assert.equal(strip('A &#128512; &#x1F600; &#x41;'), 'A 😀 😀 A');
+    assert.equal(strip('bad &#99999999; &#xD800;'), 'bad');
+    console.log('strip entities: ok');
+}
+
+// The retry by title gets what is left of the search's time (with a short floor), not a fresh deadline.
+{
+    const now = Date.now();
+    assert.equal(titleRetryMs(now - 1000, now), 29000);
+    assert.equal(titleRetryMs(now - 29000, now), 5000);
+    assert.equal(titleRetryMs(now - 60000, now), 5000);
+    console.log('title retry deadline: ok');
 }
