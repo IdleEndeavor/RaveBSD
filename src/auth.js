@@ -75,10 +75,12 @@ export function setPassword(username, password) {
 // Admin accounts only: user accounts from friends and family mode wait for it to come back.
 export function clearPassword() { settings.secrets.users = users().filter(u => u.role !== 'admin'); saveSettings(); }
 
-export function checkLogin(username, password) {
+// Asynchronous, so a burst of sign-in attempts does not hold up every other request while hashes are computed.
+const scrypt = (password, salt) => new Promise((ok, no) => crypto.scrypt(password, salt, 32, (e, k) => (e ? no(e) : ok(k))));
+export async function checkLogin(username, password) {
     const u = findName(username);
     // A hash is computed either way, so a wrong username takes as long as a wrong password.
-    const h = crypto.scryptSync(String(password || ''), u ? u.salt : 'x', 32).toString('hex');
+    const h = (await scrypt(String(password || ''), u ? u.salt : 'x')).toString('hex');
     return u && same(h, u.hash) ? u : null;
 }
 
@@ -148,12 +150,13 @@ export function revokeApiKey(id) {
     saveSettings();
 }
 
-// Small brake on password guessing: 10 wrong tries per address per 10 minutes.
+// Small brake on password guessing: 10 wrong tries per address and name per 10 minutes, and `max` per key
+// for other keys (server.js also counts 30 per address, whatever the name, so new names do not get around it).
 const tries = new Map();
-export function loginAllowed(ip) {
-    const now = Date.now(), t = tries.get(ip);
+export function loginAllowed(key, max = 10) {
+    const now = Date.now(), t = tries.get(key);
     if (!t || t.until < now) return true;
-    return t.n < 10;
+    return t.n < max;
 }
 export function noteFailedLogin(ip) {
     const now = Date.now(), t = tries.get(ip);

@@ -38,6 +38,20 @@ services:
     # keeps each page it opens shut away from the rest of the container. Without it the browser still works, unsandboxed.
     security_opt:
       - seccomp=./seccomp-chromium.json
+      # Nothing in the container can gain privileges it did not start with (setuid programs and the like).
+      - no-new-privileges:true
+    # Only the capabilities Chromium's sandbox uses; Docker's other defaults are dropped.
+    cap_drop:
+      - ALL
+    cap_add:
+      - SYS_CHROOT
+      - SETUID
+      - SETGID
+    # The image itself is read-only: RaveBSD writes only to the folders above, and the browser to /tmp (HOME).
+    read_only: true
+    tmpfs:
+      - /tmp
+    pids_limit: 512
 
   # Optional: qBittorrent for audiobook magnets. Uncomment, then in RaveBSD's first run switch
   # "Yes, connect qBittorrent" on (or later under qBittorrent in the admin panel). Its Web UI password is printed in `docker compose logs qbittorrent`.
