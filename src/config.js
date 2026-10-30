@@ -102,9 +102,31 @@ export const settings = clone(DEFAULTS);
 settings.secrets = { users: [], sessionSecret: '', apiKeys: [] };
 settings.credentials = {};
 
+// A saved file, or null on a first run. A file that cannot be read falls back to the last good copy (.bak) and
+// is set aside as .corrupt-<time>. With no good copy it throws and leaves the file as it is: the caller decides.
+export function readJson(file) {
+    let text;
+    try { text = fs.readFileSync(file, 'utf8'); } catch (e) { if (e.code === 'ENOENT') return null; throw e; }
+    try { return JSON.parse(text); } catch (e) {
+        const bak = JSON.parse(fs.readFileSync(file + '.bak', 'utf8')); // throws when there is none either
+        setAside(file);
+        console.warn(`${file} was damaged, so the previous copy (${path.basename(file)}.bak) is used.`);
+        return bak;
+    }
+}
+export function setAside(file) {
+    const to = file + '.corrupt-' + Date.now();
+    try { fs.renameSync(file, to); console.warn(`${file} could not be read and was moved to ${to}.`); } catch (e) { /* already gone */ }
+}
+
 function load() {
     let saved;
-    try { saved = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); } catch (e) { return; }
+    try { saved = readJson(SETTINGS_FILE); } catch (e) {
+        // Starting with the defaults would offer the first-run setup, and with it the admin account, to anyone.
+        console.error(`${SETTINGS_FILE} cannot be read (${e.message}). Fix or remove it, then start RaveBSD again.`);
+        process.exit(1);
+    }
+    if (!saved) return;
     // v1 files had statsEnabled, userAgentMode and credentials at the top. They carry over as they are.
     for (const k of Object.keys(DEFAULTS)) {
         if (!(k in saved)) continue;
@@ -126,14 +148,24 @@ load();
 export const userAgentForced = () => CHOICES.userAgentMode.includes(process.env.USER_AGENT_MODE);
 if (userAgentForced()) settings.userAgentMode = process.env.USER_AGENT_MODE;
 
+// Written to a temp file and flushed to disk before it replaces the old one, so a crash or power cut leaves the
+// old file or the new one, never half of one. The old one stays as .bak (a hard link, so no copying).
+const unsaved = new Set();
 export function writeJson(file, obj) {
     try {
         fs.mkdirSync(path.dirname(file), { recursive: true });
         const tmp = file + '.tmp';
-        fs.writeFileSync(tmp, JSON.stringify(obj), { mode: 0o600 });
+        const fd = fs.openSync(tmp, 'w', 0o600);
+        try { fs.writeFileSync(fd, JSON.stringify(obj)); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+        try { fs.rmSync(file + '.bak', { force: true }); fs.linkSync(file, file + '.bak'); } catch (e) { /* first save, or no hard links here */ }
         fs.renameSync(tmp, file);
         fs.chmodSync(file, 0o600);
-    } catch (e) { /* read-only volume: keep in memory */ }
+        unsaved.delete(file);
+    } catch (e) {
+        // Read-only volume or full disk: kept in memory. Said once, not on every save.
+        if (!unsaved.has(file)) console.warn(`Could not save ${file} (${e.code || e.message}). Changes stay in memory until it can be.`);
+        unsaved.add(file);
+    }
 }
 export const saveSettings = () => writeJson(SETTINGS_FILE, settings);
 
@@ -195,9 +227,9 @@ export function publicSettings() {
 // days["2026-10-12"] = { ebook, audio, saved, bytes: {ebook, audio}, fmt: {epub: n}, authors: {name: n} }
 export let stats = { days: {} };
 try {
-    const s = JSON.parse(fs.readFileSync(STATS_FILE, 'utf8'));
+    const s = readJson(STATS_FILE);
     if (s && s.days) stats = s; // v1 stats (search counts) are not carried over: v2 counts downloads
-} catch (e) { /* first run */ }
+} catch (e) { setAside(STATS_FILE); } // counts only: start again rather than stop
 const saveStats = () => writeJson(STATS_FILE, stats);
 
 export function countDownload({ kind, format, bytes, author }) {

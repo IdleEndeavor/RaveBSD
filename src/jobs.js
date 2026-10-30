@@ -11,7 +11,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { EventEmitter, once } from 'node:events';
-import { DATA, settings, writeJson, countDownload, countSaved } from './config.js';
+import { DATA, settings, readJson, writeJson, setAside, countDownload, countSaved } from './config.js';
 import { applyTemplate, singleFileAudiobook, numberedPath, tidyName, safeSegment } from './rename.js';
 import { getResult, resolveOne, zlibFileLink, freshLibgenLink, currentUA, RESOLVABLE } from './sources.js';
 import * as qbit from './qbit.js';
@@ -30,7 +30,8 @@ const newId = () => crypto.randomBytes(8).toString('hex');
 
 // items: what is on the shelf. jobs: downloads not finished yet (failed ones stay until retried or removed).
 let shelf = { items: [], jobs: [] };
-try { shelf = { items: [], jobs: [], ...JSON.parse(fs.readFileSync(SHELF_FILE, 'utf8')) }; } catch (e) { /* first run */ }
+// A damaged list with no good copy is set aside (the files on disk are untouched) rather than saved over.
+try { shelf = { items: [], jobs: [], ...readJson(SHELF_FILE) }; } catch (e) { setAside(SHELF_FILE); }
 // A direct download cannot continue after a restart; a torrent can (qBittorrent kept going).
 for (const j of shelf.jobs) if (j.how === 'direct' && !/^(failed)$/.test(j.state)) { j.state = 'failed'; j.error = 'RaveBSD restarted during the download'; }
 // Older versions saved a job's AbortController, which comes back as {} and cannot abort anything.
