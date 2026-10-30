@@ -139,7 +139,7 @@ for (const mode of ['public', 'family']) {
             assert.equal((await fresh(10)).status, 429, 'a made-up first X-Forwarded-For entry is not a new address');
             // Links, covers and torrent files reach other websites, so they have allowances of their own, per address.
             const from = (ip, p) => s.call('GET', p, { cookie: roles.visitor, headers: { 'X-Forwarded-For': ip } }).then(r => r.status);
-            for (const [p, max, ip] of [['/torrent?id=nope', 30, '203.0.113.20'], ['/resolve?id=nope', 1500, '203.0.113.21'], ['/cover?id=nope', 1500, '203.0.113.22']]) {
+            for (const [p, max, ip] of [['/torrent?id=nope', 30, '203.0.113.20'], ['/resolve?id=nope', 1500, '203.0.113.21'], ['/cover?id=nope', 3000, '203.0.113.22']]) {
                 for (let i = 0; i < max; i += 50) assert.ok((await Promise.all(Array.from({ length: Math.min(50, max - i) }, () => from(ip, p)))).every(x => x === 404), p);
                 assert.equal(await from(ip, p), 429, p + ' has an allowance');
                 assert.equal(await from('203.0.113.23', p), 404, p + ' is counted per address');
