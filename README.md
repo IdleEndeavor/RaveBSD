@@ -195,3 +195,9 @@ Thanks to [@matsver](https://github.com/matsver) for the first pull request ([#1
 
 - Integration as a source for locally hosted instances of 4get search and SearXNG
 - Integration as a plugin for Calibre
+
+## Donations (Thank YOU!)
+<a href="https://www.buymeacoffee.com/parsleyafterglow" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/default-orange.png" alt="Buy Me A Coffee" height="41" width="174"></a>
+
+## Contact
+ravesearch.nmmw4@aleeas.com
