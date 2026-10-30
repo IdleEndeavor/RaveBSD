@@ -1667,6 +1667,9 @@ export const registerResult = (r, mode) => {
     resultStore.set(r.id, r);
     if (resultStore.size > RESULT_STORE_MAX) resultStore.delete(resultStore.keys().next().value);
 };
+// A cached search answer outlives results the store has let go of, so every answer puts its results back. The
+// store's own copy wins where it still has one: it may hold a link /resolve found after the search.
+const keepResults = (results, mode) => { for (const r of results || []) registerResult(resultStore.get(r.id) || r, mode); };
 
 // Direct downloads first, then magnets, then the rest; score decides within each tier.
 const linkTier = r => (r.directUrl ? 2 : r.magnet ? 1 : 0);
@@ -1900,6 +1903,7 @@ async function plainSearch(url, mode, query, opts, env, ctx) {
         return [ok({ source: 'all', results, meta }), results.length > 0 && degradedTtl(meta)];
     });
     const out = await res.json();
+    keepResults(out.results, mode);
     // links=direct: only results with a file link (no source pages, no magnets).
     if (url.searchParams.get('links') === 'direct') out.results = out.results.filter(r => r.directUrl);
     const names = Object.keys(out.meta || {});
@@ -2002,7 +2006,7 @@ export default {
                 if (url.searchParams.get('stream') === '1') {
                     const key = searchCacheKey(mode, query, opts);
                     const hit = await edgeGet(key);
-                    if (hit) return hit;
+                    if (hit) { const out = await hit.json(); keepResults(out.results, mode); return ok(out); }
                     const ts = new TransformStream();
                     const writer = ts.writable.getWriter();
                     const enc = new TextEncoder();
