@@ -54,7 +54,7 @@ export function safeSegment(s) {
         .trim()
         .replace(/^[.\-\s]+/, '')
         .replace(/[. ]+$/, '');
-    return cut(out, MAX_CHARS, MAX_BYTES).trim();
+    return cut(out, MAX_CHARS, MAX_BYTES).replace(/[. ]+$/, '');
 }
 
 // Removes what an empty token leaves behind in one segment: "()", "[]", " - " at either end or doubled.

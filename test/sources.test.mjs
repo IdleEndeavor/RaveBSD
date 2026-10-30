@@ -233,6 +233,9 @@ console.log('All sources tests passed.');
     const r = { title: 'Cien años de soledad', author: 'Gabriel García Márquez', format: 'epub' };
     assert.equal(scoreResult(r, 'cien anos de soledad'), scoreResult(r, 'cien años de soledad'), 'the exact-title bonus ignores accents');
     assert.equal(tokenCoverage(r, 'soledad garcia marquez'), 1);
+    // Other scripts keep their marks: ガン is not カン, and Hindi words keep their vowel signs.
+    assert.equal(tokenCoverage({ title: 'カン' }, 'ガン'), 0);
+    assert.equal(tokenCoverage({ title: 'हिन्दी का इतिहास' }, 'हिन्दी का'), 1);
     console.log('accent-blind scoring: ok');
 }
 
@@ -241,6 +244,7 @@ console.log('All sources tests passed.');
     assert.equal(parseOpts(new URL('http://x/?q=a&lang=Español')).lang, 'español');
     assert.equal(parseOpts(new URL('http://x/?q=a&lang=pt-BR')).lang, 'pt-br');
     assert.equal(parseOpts(new URL('http://x/?q=a&lang=en<script>')).lang, 'enscript');
+    assert.equal(parseOpts(new URL('http://x/?q=a&lang=---')).lang, '', 'no language at all, not one nothing matches');
     console.log('parseOpts lang: ok');
 }
 

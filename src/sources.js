@@ -285,13 +285,15 @@ function parseLibgenTitleCell(titleCell) {
 
 // Lowercase, punctuation stripped, spaces collapsed, so "Hollywood, Ending"
 // and "hollywood ending" compare equal.
-const normText = t => (t || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
+const normText = t => (t || '').toLowerCase().replace(/[^\p{L}\p{M}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
 
 // How well a result matches the search, from 0 to 1: the share of the search's meaningful words found in
 // the title, author or series. Small words ("the", "for", "is") don't count, accents are ignored and a plural
 // matches its singular, so "the word for world is forest" needs word, world and forest.
 const STOP = new Set('a an and the of for to in on at by with from is are was be or as it its his her de la le les el los las del der die das und et y du des un une'.split(' '));
-const fold = t => normText(String(t || '').normalize('NFD').replace(/\p{M}/gu, ''));
+// Only the accents of Latin, Greek and Cyrillic letters go: other scripts' marks (Japanese dakuten, Devanagari
+// vowel signs) change the word.
+const fold = t => normText(String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').normalize('NFC'));
 const stem = w => (w.length > 3 ? w.replace(/(?:es|s)$/, '') : w);
 function queryWords(q) {
     const all = fold(q).split(' ').filter(w => w.length > 1 || /\d/.test(w));
@@ -1712,7 +1714,7 @@ export function parseOpts(url) {
     const list = k => (url.searchParams.get(k) || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
     const y = (url.searchParams.get('year') || '').match(/^\s*(\d{4})(?:\s*-\s*(\d{4}))?\s*$/);
     // Letters in any script ("español", "русский") and the hyphen of regional codes ("pt-br").
-    const lang = (url.searchParams.get('lang') || '').trim().toLowerCase().replace(/[^\p{L}-]/gu, '').slice(0, 20);
+    const lang = (url.searchParams.get('lang') || '').trim().toLowerCase().replace(/[^\p{L}\p{M}-]/gu, '').replace(/^-+|-+$/g, '').slice(0, 20);
     const title = (url.searchParams.get('q') && url.searchParams.get('title') || '').trim().slice(0, 300);
     return { formats: list('formats'), sources: list('sources'), yearFrom: y ? +y[1] : 0, yearTo: y ? +(y[2] || y[1]) : 0, lang, title };
 }

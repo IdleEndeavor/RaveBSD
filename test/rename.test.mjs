@@ -43,4 +43,5 @@ assert.ok(cjk.endsWith('.epub') && bytes(cjk) <= 200, 'cut by bytes: ' + bytes(c
 const emoji = safeSegment('x' + '😀'.repeat(150));
 assert.ok(bytes(emoji) <= 200 && !/[\ud800-\udfff]/u.test(emoji.replace(/\p{Extended_Pictographic}/gu, '')), 'no half emoji');
 assert.equal([...emoji].every(c => c === 'x' || c === '😀'), true);
+assert.ok(!safeSegment('a'.repeat(119) + '. b').endsWith('.'), 'a cut name never ends in a dot');
 console.log('rename: ok');
