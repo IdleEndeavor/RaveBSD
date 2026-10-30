@@ -214,9 +214,13 @@ const fail = (res, e, code = 400) => send(res, code, { error: (e && e.message) |
 // ── Server-sent events ───────────────────────────────────────────────────────
 // Each open page gets the events meant for it: its own jobs and finished downloads (visitors), and server
 // warnings only for admins.
-const clients = new Map(); // response -> who
+const clients = new Map(); // response -> { me, req }
+// A page keeps its stream only while it is still the same person: a removed account, a new password, "sign out
+// everywhere", an expired session or a mode change ends it, and the page reconnects as whoever it is now.
+const sameAs = (req, me) => { const now = auth.who(req); return now.role === me.role && (now.user || {}).id === (me.user || {}).id && (now.vid || '') === (me.vid || ''); };
+function dropStale() { for (const [c, { me, req }] of clients) if (!sameAs(req, me)) { clients.delete(c); c.end(); } }
 jobs.events.on('event', ev => {
-    for (const [c, me] of clients) {
+    for (const [c, { me }] of clients) {
         let out = ev;
         if (ev.type === 'jobs') out = { type: 'jobs', jobs: jobs.listJobs(me), active: jobs.activeCount(me) };
         else if (me.role === 'visitor' && (ev.type === 'done' || ev.type === 'failed') && !(ev.owners || []).includes(me.vid)) continue;
@@ -227,7 +231,7 @@ jobs.events.on('event', ev => {
 });
 // Downloads queued while the tunnel was down start once it is back.
 onVpnChange(v => { jobs.events.emit('event', { type: 'vpn', up: v.up, error: v.error }); jobs.pump(); });
-setInterval(() => { for (const c of clients.keys()) c.write(': ping\n\n'); }, 25e3).unref();
+setInterval(() => { dropStale(); for (const c of clients.keys()) c.write(': ping\n\n'); }, 25e3).unref();
 
 // What a non-admin's page may know of the settings: how searching and saving behave, never folders,
 // addresses, logins or keys.
@@ -609,17 +613,22 @@ const server = http.createServer(async (req, res) => {
         // Visitors share the server's libraries and its address's standing with them: 30 searches per 5 minutes each.
         if (me.role === 'visitor' && p.startsWith('/search/') && limited(`s|${me.ip}`, 30, 300e3)) return fail(res, 'That is a lot of searching. Wait a few minutes.', 429);
         if (p === '/events') {
-            if (me.role === 'visitor' && [...clients.values()].filter(c => c.vid === me.vid).length >= 4) return fail(res, 'Too many open pages', 429);
+            if (me.role === 'visitor' && [...clients.values()].filter(c => c.me.vid === me.vid).length >= 4) return fail(res, 'Too many open pages', 429);
             res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no', ...SECURITY });
             res.write(`data: ${JSON.stringify({ type: 'hello', jobs: jobs.listJobs(me), active: jobs.activeCount(me) })}\n\n`);
-            clients.set(res, me);
+            clients.set(res, { me, req });
             req.on('close', () => clients.delete(res));
             return;
         }
         if (p.startsWith('/files/')) return sendShelfFile(req, res, p.slice(7), url, me);
         if (p === '/cover') return sendCover(res, url, me);
         if (p.startsWith('/browser/')) return browserRoutes(req, res, url);
-        if (p.startsWith('/api/') && !p.startsWith('/api/v1/')) return await api(req, res, url, me);
+        if (p.startsWith('/api/') && !p.startsWith('/api/v1/')) {
+            await api(req, res, url, me);
+            // Changes to accounts, sessions or the mode come through here; open pages catch up at once.
+            if (req.method !== 'GET') dropStale();
+            return;
+        }
 
         const r = await core.fetch(new Request(url, { method: req.method, headers: req.headers }), {}, { waitUntil: q => q.catch(() => {}), passThroughOnException() {} });
         // Other websites may read the scripting API (/api/v1, key-protected), not the page's own search routes.
