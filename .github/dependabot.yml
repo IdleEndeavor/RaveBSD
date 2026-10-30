@@ -8,9 +8,12 @@ updates:
       interval: weekly
     commit-message:
       prefix: ci
+    # Minor and patch updates come grouped; a new major version gets its own pull request, since it can
+    # change an action's inputs.
     groups:
       actions:
         patterns: ['*']
+        update-types: [minor, patch]
 
   - package-ecosystem: docker
     directory: /

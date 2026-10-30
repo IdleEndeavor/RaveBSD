@@ -11,6 +11,12 @@ permissions:
   contents: read
   packages: write
 
+# Two quick pushes to main would otherwise build at the same time, and the older one could finish last and
+# leave an outdated image tagged "latest". A newer push cancels the older run; each tag has its own group.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   publish:
     runs-on: ubuntu-latest
