@@ -71,6 +71,39 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     assert.ok(!fs.existsSync(path.dirname(old)), 'no empty author folder left behind');
     console.log('saves, shelf marks, tidy: ok');
 }
+// Letting go of a download stops it; only its owner may; Z-Library stays the owner's.
+{
+    const { settings } = await import('../src/config.js');
+    const jobs = await import('../src/jobs.js');
+    const { registerResult } = await import('../src/sources.js');
+    settings.qbit.directSlots = 0; // nothing starts, so nothing reaches the network
+    const admin = { role: 'admin' }, V = { role: 'visitor', vid: 'f'.repeat(24) };
+    const U1 = { role: 'user', user: { id: 'u1' } }, U2 = { role: 'user', user: { id: 'u2' } };
+    const result = (title, directUrl) => { const r = { title, author: 'T', format: 'epub', filesize: 1000, source: 'Test', directUrl }; registerResult(r, 'ebooks'); return r; };
+    const ids = () => jobs.listJobs(admin).map(j => j.id);
+
+    const a = await jobs.startDownload(result('Forgotten', 'https://files.example/a.epub').id, '', V);
+    assert.ok(ids().includes(a.id), 'the visitor\'s download is queued');
+    jobs.forget(a.id, V);
+    assert.ok(!ids().includes(a.id), 'forgetting it stops it instead of leaving it to finish with no owner');
+
+    const shared = result('Shared', 'https://files.example/s.epub');
+    const s = await jobs.startDownload(shared.id, '', admin);
+    assert.equal((await jobs.startDownload(shared.id, '', V)).id, s.id, 'the visitor joins the admin\'s download');
+    jobs.forget(s.id, V);
+    assert.ok(ids().includes(s.id), 'a visitor letting go does not stop the admin\'s download');
+    jobs.forget(s.id, admin);
+
+    await assert.rejects(jobs.startDownload(result('Zlib','/dl/zlib?id=1&hash=x').id, '', V), /for the owner/, 'visitors cannot spend the owner\'s Z-Library limit');
+
+    const b = await jobs.startDownload(result('Theirs', 'https://files.example/b.epub').id, '', U1);
+    jobs.forget(b.id, U2);
+    assert.ok(ids().includes(b.id), 'a family user cannot forget someone else\'s download');
+    jobs.forget(b.id, U1);
+    assert.ok(!ids().includes(b.id), 'its owner can');
+    settings.qbit.directSlots = 2;
+    console.log('forget stops downloads: ok');
+}
 
 // ── Part 2: every route, per mode and role ───────────────────────────────────
 // seed: a settings.json to start from; setup: false leaves first-run setup undone.

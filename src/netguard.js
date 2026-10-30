@@ -65,3 +65,16 @@ export async function fetchPublic(url, init = {}) {
     }
     throw new Error('The site kept redirecting. Try again, or open its page.');
 }
+
+// Reads a body, giving up as soon as it passes max bytes, so an answer that never ends cannot fill memory.
+export async function readCapped(res, max) {
+    if (+res.headers.get('content-length') > max) { if (res.body) res.body.cancel().catch(() => {}); throw new Error('Too big'); }
+    const parts = [];
+    let n = 0;
+    for await (const chunk of res.body || []) {
+        n += chunk.length;
+        if (n > max) throw new Error('Too big'); // leaving the loop cancels the rest of the body
+        parts.push(chunk);
+    }
+    return Buffer.concat(parts);
+}

@@ -16,3 +16,16 @@ console.log('netguard: ok');
     for (const ip of ['2606:4700:4700::1111', '::ffff:808:808', '64:ff9b::808:808', '2a00:1450:4009:81f::200e']) assert.ok(!priv(ip), ip);
     console.log('netguard ipv6: ok');
 }
+
+// Bodies are read up to a limit and no further, whether or not the site says how big they are.
+{
+    const { readCapped } = await import('../src/netguard.js');
+    assert.equal((await readCapped(new Response('x'.repeat(100)), 100)).length, 100);
+    await assert.rejects(readCapped(new Response('x'.repeat(101)), 100), /Too big/);
+    await assert.rejects(readCapped(new Response('x', { headers: { 'Content-Length': '999' } }), 100), /Too big/, 'a declared size over the limit is refused unread');
+    let pulled = 0;
+    const endless = new ReadableStream({ pull(c) { pulled++; c.enqueue(new Uint8Array(1000)); } });
+    await assert.rejects(readCapped(new Response(endless), 5000), /Too big/);
+    assert.ok(pulled < 10, 'an endless body stops being read at the limit');
+    console.log('netguard readCapped: ok');
+}

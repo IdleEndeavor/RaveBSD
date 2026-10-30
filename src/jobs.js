@@ -10,14 +10,14 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { EventEmitter } from 'node:events';
+import { EventEmitter, once } from 'node:events';
 import { DATA, settings, writeJson, countDownload, countSaved } from './config.js';
 import { applyTemplate, singleFileAudiobook, numberedPath, tidyName, safeSegment } from './rename.js';
 import { getResult, resolveOne, zlibFileLink, freshLibgenLink, currentUA, RESOLVABLE } from './sources.js';
 import * as qbit from './qbit.js';
 import { vpnBlocks } from './vpn.js';
 import { listFiles, extractZip } from './zip.js';
-import { fetchPublic } from './netguard.js';
+import { fetchPublic, readCapped } from './netguard.js';
 
 export const events = new EventEmitter();
 events.setMaxListeners(200);
@@ -33,6 +33,8 @@ let shelf = { items: [], jobs: [] };
 try { shelf = { items: [], jobs: [], ...JSON.parse(fs.readFileSync(SHELF_FILE, 'utf8')) }; } catch (e) { /* first run */ }
 // A direct download cannot continue after a restart; a torrent can (qBittorrent kept going).
 for (const j of shelf.jobs) if (j.how === 'direct' && !/^(failed)$/.test(j.state)) { j.state = 'failed'; j.error = 'RaveBSD restarted during the download'; }
+// Older versions saved a job's AbortController, which comes back as {} and cannot abort anything.
+for (const j of shelf.jobs) delete j.ctrl;
 const save = () => writeJson(SHELF_FILE, shelf);
 
 const dirFor = kind => path.resolve(kind === 'audiobook' ? settings.shelves.audioDir : settings.shelves.ebookDir);
@@ -165,6 +167,8 @@ export async function startDownload(resultId, clientId, me) {
         job.how = 'direct'; job.link = r.directUrl;
         if (/\/get\.php\?md5=/.test(r.directUrl) && r.md5) job.md5 = String(r.md5).toLowerCase();
     } else throw new Error('This one has no file link. Open the source page instead.');
+    // Z-Library files come through the owner's account and count against its daily limit.
+    if (visitor && job.link.startsWith('/dl/zlib')) throw new Error('Z-Library downloads here are for the owner. Open the source page instead.');
     shelf.jobs.push(job);
     save();
     announceJobs();
@@ -190,15 +194,22 @@ export async function cancel(jobId, me) {
     if (!j) return;
     // Started by someone else, or shared: a visitor just steps away from it.
     if (isVisitor(me) && (j.owners.length > 1 || !(j.owner && j.owner.type === 'visitor'))) { j.owners = j.owners.filter(v => v !== me.vid); save(); announceJobs(); return; }
-    if (j.ctrl) j.ctrl.abort();
-    if (j.how === 'qbit' && j.hash && j.state !== 'failed') await qbit.removeTorrent(j.hash, true).catch(() => {});
-    if (j.part) fs.rm(j.part, { force: true }, () => {});
-    shelf.jobs = shelf.jobs.filter(x => x !== j);
+    await drop(j);
     save(); announceJobs();
     pump();
 }
 
+// Stops a job for good: off the list first (runDirect then gives up quietly), then the download, its temp
+// file and its torrent.
+async function drop(j) {
+    shelf.jobs = shelf.jobs.filter(x => x !== j);
+    if (j.ctrl) j.ctrl.abort();
+    if (j.part) fs.rm(j.part, { force: true }, () => {});
+    if (j.how === 'qbit' && j.hash && j.state !== 'failed') await qbit.removeTorrent(j.hash, true).catch(() => {});
+}
+
 function fail(j, msg) {
+    if (!shelf.jobs.includes(j)) return; // already cancelled or forgotten: nobody to tell
     j.state = 'failed'; j.error = msg; delete j.ctrl;
     if (j.part) fs.rm(j.part, { force: true }, () => {});
     save(); announceJobs();
@@ -235,13 +246,16 @@ const filenameFrom = (res, url) => {
 
 async function runDirect(j) {
     j.state = 'downloading'; j.wait = ''; j.progress = 0;
-    const ctrl = j.ctrl = new AbortController();
+    // Not enumerable, so shelf.json never holds it.
+    const ctrl = new AbortController();
+    Object.defineProperty(j, 'ctrl', { value: ctrl, writable: true, configurable: true });
     let idle = null;
     // Give up if nothing arrives for a minute; big files may take as long as they need otherwise.
     const stall = () => { clearTimeout(idle); idle = setTimeout(() => ctrl.abort(new Error('The site stopped sending')), 60e3); };
     announceJobs();
     const dir = dirFor(j.kind);
     const incoming = path.join(dir, '.incoming');
+    let out = null;
     try {
         let url = j.link;
         if (j.md5) url = (await freshLibgenLink(j.md5)) || url;
@@ -283,11 +297,13 @@ async function runDirect(j) {
         // Made here, after the site answered, so a temp folder removed as another download ended is back.
         await fsp.mkdir(incoming, { recursive: true });
         j.part = path.join(incoming, j.id + '.part');
-        const out = fs.createWriteStream(j.part);
+        out = fs.createWriteStream(j.part);
+        // A full or failing disk ends this download instead of the whole server.
+        out.on('error', e => ctrl.abort(e));
         let last = 0, lastBytes = 0, lastT = Date.now();
         for await (const chunk of res.body) {
             stall();
-            if (!out.write(chunk)) await new Promise(r => out.once('drain', r));
+            if (!out.write(chunk)) await once(out, 'drain', { signal: ctrl.signal }); // rejects if the write fails or the job stops
             j.bytes += chunk.length;
             if (j.bytes > room) { out.destroy(); throw new Error(`That went over your space here (${mb(quota())} each)`); }
             const now = Date.now();
@@ -313,6 +329,7 @@ async function runDirect(j) {
         } else await fileIt(j, [j.part]);
     } catch (e) {
         clearTimeout(idle);
+        if (out) out.destroy();
         if (!shelf.jobs.includes(j)) return; // cancelled
         const reason = ctrl.signal.aborted && ctrl.signal.reason;
         fail(j, (reason && reason.message) || (e.cause && e.cause.code ? 'Could not reach the site' : e.message) || 'Download failed');
@@ -338,6 +355,7 @@ function watchTorrents() {
         for (const j of list) {
             try {
                 const t = await qbit.torrentInfo(j.hash);
+                if (!shelf.jobs.includes(j)) continue; // cancelled or forgotten meanwhile
                 delete j.qbitError;
                 if (!t) { if (Date.now() - (j.addedToQbit || 0) > 120e3) fail(j, 'qBittorrent lost this torrent'); continue; }
                 j.progress = Math.min(1, t.progress || 0); j.speed = t.dlspeed || 0; j.peers = (t.num_seeds || 0) + (t.num_leechs || 0);
@@ -436,14 +454,15 @@ async function fileIt(j, files, { copy = false, srcRoot = '' } = {}) {
 // The result's cover next to an audiobook's tracks, for players that show folder art. At most 5 MB.
 async function saveCover(url, to) {
     const res = await fetchPublic(url, { headers: { 'User-Agent': currentUA() }, signal: AbortSignal.timeout(15000) });
-    if (!res.ok || !/^image\//.test(res.headers.get('content-type') || '')) return;
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length > 5e6) return;
-    await fsp.writeFile(to, buf);
+    if (!res.ok || !/^image\//.test(res.headers.get('content-type') || '')) { if (res.body) res.body.cancel().catch(() => {}); return; }
+    await fsp.writeFile(to, await readCapped(res, 5e6));
 }
 
 // skipped: the path of a book already on disk under the same name (duplicate set to "skip").
 function finish(j, filed, note, skipped) {
+    // A visitor's job let go of while its files were being placed still lands, but as a visitors' book nobody
+    // holds, so tidy() removes it instead of it staying on the shelf with no owner and no quota.
+    const orphan = !shelf.jobs.includes(j) && !!(j.owner && j.owner.type === 'visitor');
     shelf.jobs = shelf.jobs.filter(x => x !== j);
     if (j.part) fs.rm(j.part, { force: true }, () => {});
     const owners = j.owners || [];
@@ -456,12 +475,14 @@ function finish(j, filed, note, skipped) {
             fp: j.fp || '', addedBy: j.owner || { type: 'admin' },
             // Fetched for visitors: theirs until it expires, then removed from the server.
             ...(owners.length ? { visitorsOnly: !!(j.owner && j.owner.type === 'visitor'), owners: owners.map(id => ({ id, at: Date.now(), savedAt: 0 })) } : {}),
+            ...(orphan ? { visitorsOnly: true, owners: [] } : {}),
         };
         // "Replace it": the old row for this file goes, and whoever held it keeps it.
         const old = shelf.items.filter(i => path.resolve(i.path) === path.resolve(filed.path));
         for (const o of old) for (const w of o.owners || []) attach(item, w.id);
         if (old.length) shelf.items = shelf.items.filter(i => !old.includes(i));
         shelf.items.unshift(item);
+        if (orphan) setImmediate(() => tidy().catch(() => {}));
         shelfKeys = onShelfKeys();
         countDownload({ kind: j.kind, format: j.format, bytes: filed.size, author: j.author });
     } else if (skipped && owners.length) {
@@ -522,13 +543,17 @@ export function forget(id, me) {
     if (isVisitor(me)) {
         const i = getItem(id); if (i && holds(i, me.vid)) i.owners = i.owners.filter(o => o.id !== me.vid);
         const j = shelf.jobs.find(x => x.id === id && (x.owners || []).includes(me.vid));
-        if (j) { j.owners = j.owners.filter(v => v !== me.vid); if (!j.owners.length) shelf.jobs = shelf.jobs.filter(x => x !== j); }
+        // The last visitor to let go of a visitor's job stops it, or it would keep downloading onto the shelf with
+        // no owner. One the admin or a family user started keeps going for them.
+        if (j) { j.owners = j.owners.filter(v => v !== me.vid); if (!j.owners.length && j.owner && j.owner.type === 'visitor') drop(j).then(pump, () => {}); }
         save(); emit('shelf', {}); announceJobs();
         return;
     }
+    const j = shelf.jobs.find(x => x.id === id);
+    if (j && !canChange(me, j)) return;
     if (me && me.role === 'user') { const i = getItem(id); if (i && !(i.addedBy && i.addedBy.id === me.user.id)) return; }
     shelf.items = shelf.items.filter(i => i.id !== id);
-    shelf.jobs = shelf.jobs.filter(j => j.id !== id);
+    if (j) drop(j).then(pump, () => {});
     shelfKeys = onShelfKeys();
     save(); emit('shelf', {}); announceJobs();
 }
