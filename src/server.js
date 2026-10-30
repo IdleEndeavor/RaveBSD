@@ -194,6 +194,8 @@ const send = (res, code, obj, headers = {}) => {
 const ipOf = req => (process.env.TRUST_PROXY === '1' && String(req.headers['x-forwarded-for'] || '').split(',').pop().trim()) || req.socket.remoteAddress || '';
 // Counts per key in a sliding window; true once the key went over its allowance.
 const windows = new Map();
+// Per visitor address and 5 minutes, beside the 30 searches.
+const VISITOR_FETCHES = new Map([['/resolve', 1500], ['/cover', 1500], ['/torrent', 30]]);
 function limited(key, max, ms) {
     const now = Date.now(), w = windows.get(key);
     if (!w || w.until < now) { if (windows.size > 20000) for (const [k, v] of windows) if (v.until < now) windows.delete(k); windows.set(key, { n: 1, until: now + ms }); return false; }
@@ -608,6 +610,9 @@ const server = http.createServer(async (req, res) => {
 
         // Visitors share the server's libraries and its address's standing with them: 30 searches per 5 minutes each.
         if (me.role === 'visitor' && p.startsWith('/search/') && limited(`s|${me.ip}`, 30, 300e3)) return fail(res, 'That is a lot of searching. Wait a few minutes.', 429);
+        // Links, covers and torrent files are fetched from other websites too. A results page asks for one link and
+        // one cover per result (at most 80 covers ahead), so these sit far above what browsing results needs.
+        if (me.role === 'visitor' && VISITOR_FETCHES.has(p) && limited(`${p}|${me.ip}`, VISITOR_FETCHES.get(p), 300e3)) return fail(res, 'That is a lot of requests. Wait a few minutes.', 429);
         if (p === '/events') {
             if (me.role === 'visitor' && [...clients.values()].filter(c => c.vid === me.vid).length >= 4) return fail(res, 'Too many open pages', 429);
             res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no', ...SECURITY });
