@@ -101,9 +101,10 @@ bus.addEventListener('settings', e => setPublicMode(e.detail && e.detail.access 
 // Admins run the server; users (friends and family) and visitors (public) get their own browser's settings.
 export const isAdmin = () => !!(app.session && app.session.role === 'admin');
 
-let es = null;
+let es = null, retryIn = 1000, retryTimer = null;
 function connect() {
     if (es) es.close();
+    clearTimeout(retryTimer);
     es = new EventSource('/events');
     es.onmessage = m => {
         let ev; try { ev = JSON.parse(m.data); } catch (e) { return; }
@@ -118,7 +119,14 @@ function connect() {
         emit(ev.type, ev);
     };
     // The browser reconnects by itself; after a server restart, refresh what may have changed.
-    es.onopen = () => refreshStatus();
+    es.onopen = () => { retryIn = 1000; refreshStatus(); };
+    // But not after an error answer (the server restarting behind a proxy, a session that ended): then the
+    // connection is closed for good, so try again, waiting longer each time (up to a minute).
+    es.onerror = () => {
+        if (es.readyState !== EventSource.CLOSED) return;
+        retryTimer = setTimeout(connect, retryIn);
+        retryIn = Math.min(retryIn * 2, 60e3);
+    };
 }
 
 // A download this browser started has finished. Works on any page, not only the results.
