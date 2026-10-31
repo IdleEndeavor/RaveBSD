@@ -313,7 +313,7 @@ console.log('All sources tests passed.');
 
 // Lectulandia: book cards (search and author pages), the author list a search shows, and the file code in a book page.
 {
-    const { parseLectulandia, lectulandiaAuthors, lectulandiaFileUrl, fileRequest } = await import('../src/sources.js');
+    const { parseLectulandia, lectulandiaAuthors, lectulandiaFileUrl, fileRequest, RAVE_UA } = await import('../src/sources.js');
     const card = `<article id="post-123264" class="card">
     <a class="card-click-target" tabindex="-1" aria-hidden="true" href="/book/carl-el-mazmorrero/" title="" ></a>
     <img class="cover" src="https://assets.lectulandia.com/b/ab/Matt%20Dinniman/Carl%20el%20Mazmorrero%20(1)/small.jpg" alt="Carl el Mazmorrero" />
@@ -335,6 +335,8 @@ console.log('All sources tests passed.');
     assert.equal(lectulandiaFileUrl('<p>no links</p>'), null);
     assert.equal(lectulandiaFileUrl('<a href="/download.php?t=1&d=Li4vLi4vZXRj">'), null, 'a code that is not one is refused');
     assert.deepEqual(await fileRequest('https://files.example/a.epub'), { url: 'https://files.example/a.epub', headers: {} }, 'other hosts are fetched as they are');
+    // Wikisource's EPUB maker shows a bot check to browser User-Agents, so its downloads say who they are.
+    assert.equal((await fileRequest('https://ws-export.wmcloud.org/?format=epub&lang=en&page=X')).headers['User-Agent'], RAVE_UA);
     // The antupload session cookie stays with antupload when the file link redirects elsewhere.
     const { redirectInit } = await import('../src/netguard.js');
     const init = { signal: null, headers: { Cookie: 'laravel_session=x', Referer: 'https://www.antupload.com/file/a/', 'User-Agent': 'ua' } };

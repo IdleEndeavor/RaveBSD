@@ -271,7 +271,7 @@ async function runDirect(j) {
         stall();
         let res; const failed = []; let rounds = 0;
         for (;;) {
-            res = await fetchPublic(url, { signal: ctrl.signal, headers: { ...hostHeaders, 'User-Agent': currentUA(), Accept: '*/*' } });
+            res = await fetchPublic(url, { signal: ctrl.signal, headers: { 'User-Agent': currentUA(), Accept: '*/*', ...hostHeaders } });
             stall();
             if (res.status < 500 || !j.md5) break;
             if (res.body) res.body.cancel().catch(() => {});

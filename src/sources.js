@@ -1141,8 +1141,10 @@ async function resolveLectulandia(r) {
 }
 
 // What to fetch for a file link. antupload's file page sets a session cookie and links the file, which is
-// only handed over with that cookie and the page as referrer. Other links are fetched as they are.
+// only handed over with that cookie and the page as referrer. Wikisource's EPUB maker shows browsers a bot check
+// and hands the file to clients that say who they are. Other links are fetched as they are.
 export async function fileRequest(url, signal) {
+    if (/^https:\/\/ws-export\.wmcloud\.org\//.test(String(url))) return { url, headers: { 'User-Agent': RAVE_UA } };
     const m = String(url).match(/^https?:\/\/(?:www\.)?antupload\.com\/file\/([A-Za-z0-9]+)\/?$/);
     if (!m) return { url, headers: {} };
     const page = `https://www.antupload.com/file/${m[1]}/`;
