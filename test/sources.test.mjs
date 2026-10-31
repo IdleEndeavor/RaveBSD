@@ -3,7 +3,7 @@
 // Each block tests one helper. When you add parsing or ranking code, add a block here.
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import worker, { parseFilesizeBytes, royallibUnitChar, get, withDeadline, withEdgeCache, rankMirrors, fetchFirstValid, scoreResult, tokenCoverage, currentUA, setUserAgentMode, BROWSER_UA, RAVE_UA, parseOpts, relevance, relevanceBand, interleaveGroups, isbnOf, libgenSearchParams } from '../src/sources.js';
+import worker, { parseFilesizeBytes, royallibUnitChar, get, withDeadline, withEdgeCache, rankMirrors, fetchFirstValid, scoreResult, tokenCoverage, currentUA, setUserAgentMode, BROWSER_UA, RAVE_UA, parseOpts, relevance, relevanceBand, interleaveGroups, isbnOf, libgenSearchParams, getResult } from '../src/sources.js';
 
 // parseFilesizeBytes: LibGen, Anna's and AudiobookBay each write the size unit differently.
 {
@@ -195,4 +195,23 @@ console.log('All sources tests passed.');
     assert.deepEqual(text.getAll('columns[]'), ['t', 'a']);
     assert.deepEqual(libgenSearchParams('x', 'audiobooks').getAll('topics[]'), ['a', 'm']);
     console.log('libgenSearchParams: ok');
+}
+
+// A cached search answer outlives the result store, which keeps only the newest results: every answer, cached
+// or not, puts its results back, so a download from it never says "expired".
+{
+    const store = new Map();
+    globalThis.caches = { default: { async match(req) { const b = store.get(req.url); return b && new Response(b); }, async put() {} } };
+    const ctx = { waitUntil() {}, passThroughOnException() {} };
+    for (const [q, extra] of [['cached plain', ''], ['cached stream', '&stream=1']]) {
+        const id = 'gone' + extra.length;
+        store.set('https://edge-cache.internal/search/all?mode=ebooks&q=' + encodeURIComponent(q),
+            JSON.stringify({ source: 'all', results: [{ id, title: 'T', source: 'Test', directUrl: 'https://files.example/t.epub' }], meta: {} }));
+        assert.equal(getResult(id), undefined);
+        const res = await worker.fetch(new Request('http://x/search/all?q=' + encodeURIComponent(q) + extra), {}, ctx);
+        assert.equal((await res.json()).results[0].id, id);
+        assert.equal(getResult(id)?.directUrl, 'https://files.example/t.epub', 'a cached result can be downloaded' + extra);
+    }
+    delete globalThis.caches;
+    console.log('cached results stay downloadable: ok');
 }
