@@ -5,7 +5,7 @@ import dns from 'node:dns/promises';
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
-import { PassThrough, Readable } from 'node:stream';
+import { PassThrough } from 'node:stream';
 import zlib from 'node:zlib';
 
 function v4Private(ip) {
@@ -87,10 +87,13 @@ export function pinnedFetch(url, init = {}, allow = ip => !isPrivateIp(ip)) {
                 // The body passes through here so a connection dropped mid-way rejects like fetch()'s (TypeError, cause).
                 const steps = [new PassThrough(), ...decoders(r.headers['content-encoding'])];
                 const body = steps[steps.length - 1];
-                for (let i = 1; i < steps.length; i++) steps[i - 1].on('error', e => body.destroy(e)).pipe(steps[i]);
-                r.on('error', e => body.destroy(signal && signal.aborted ? signal.reason : new TypeError('terminated', { cause: e }))).pipe(steps[0]);
-                body.on('close', () => r.destroy());
-                resolve(new Response(Readable.toWeb(body), { status: r.statusCode, statusText: r.statusMessage, headers: hdrs }));
+                // An error after the reader let go (a cancelled body, then the connection drops) has nobody left to
+                // hear it; unheard, it would end the process. Whoever is still reading gets it as before.
+                const fail = e => { if (!body.destroyed) body.destroy(e); };
+                for (let i = 1; i < steps.length; i++) steps[i - 1].on('error', fail).pipe(steps[i]);
+                r.on('error', e => fail(signal && signal.aborted ? signal.reason : new TypeError('terminated', { cause: e }))).pipe(steps[0]);
+                body.on('error', () => {}).on('close', () => { r.destroy(); for (const x of steps) x.destroy(); });
+                resolve(new Response(ReadableStream.from(body), { status: r.statusCode, statusText: r.statusMessage, headers: hdrs }));
             } catch (e) { r.destroy(); reject(new TypeError('fetch failed', { cause: e })); }
         });
         // fetch() does not switch protocols either.

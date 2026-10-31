@@ -1,5 +1,6 @@
 // Checks that scraped links can never reach private addresses. Run: node test/netguard.test.mjs
 import assert from 'node:assert/strict';
+const sleep = ms => new Promise(ok => setTimeout(ok, ms));
 import { isPrivateIp, assertPublicUrl } from '../src/netguard.js';
 for (const ip of ['127.0.0.1', '10.1.2.3', '192.168.1.1', '172.20.0.5', '169.254.169.254', '100.64.0.1', '::1', 'fd00::1', '::ffff:192.168.0.1', '0.0.0.0']) assert.ok(isPrivateIp(ip), ip);
 for (const ip of ['1.1.1.1', '8.8.8.8', '172.32.0.1', '2606:4700::1111']) assert.ok(!isPrivateIp(ip), ip);
@@ -57,6 +58,23 @@ console.log('netguard: ok');
     ctrl.abort(new Error('The site stopped sending'));
     await assert.rejects(reader.read(), /stopped sending/, 'an abort mid-body rejects with its reason');
     await assert.rejects(pinnedFetch(base + '/', { signal: AbortSignal.abort(new Error('gone')) }, any), /gone/);
+    // Cancelling a body while data is still arriving (fetchPublic does it on every redirect) ends the stream
+    // quietly; on some Node 24 versions Readable.toWeb turned it into an uncaught error that ended the process.
+    const flood = http.createServer((req, res) => {
+        const gz = req.url === '/gz';
+        res.writeHead(req.url === '/moved' ? 302 : 200, gz ? { 'Content-Encoding': 'gzip' } : { Location: '/x' });
+        const out = gz ? zlib.createGzip() : res; if (gz) out.pipe(res);
+        const iv = setInterval(() => out.write(Buffer.alloc(65536, 1)), 5);
+        res.on('close', () => clearInterval(iv));
+    });
+    await new Promise(ok => flood.listen(0, '127.0.0.1', ok));
+    for (const p of ['/moved', '/plain', '/gz']) {
+        const r = await pinnedFetch(`http://localhost:${flood.address().port}${p}`, {}, any);
+        await sleep(30);
+        await r.body.cancel();
+    }
+    await sleep(200);
+    flood.closeAllConnections(); flood.close();
     // What a hostile site can answer: odd statuses, a protocol switch, a connection cut mid-body, stacked codings.
     const net = await import('node:net');
     const raw = net.createServer(sock => sock.once('data', d => {
