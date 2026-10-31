@@ -14,11 +14,6 @@ const SECTIONS = [
 // everything that runs the server: libraries, accounts and API keys, folders, qBittorrent, the VPN, backups.
 let adminPage = false;
 const sections = () => SECTIONS.filter(([id]) => (id === 'device') !== adminPage);
-const SRC_INFO = {
-    libgen: ['eBooks · mirrors tried in order', '#FF8A65'], archive: ['eBooks and audiobooks · lending items left out', '#8FD0FF'], gutenberg: ['eBooks · public domain', '#FFD54A'],
-    openstax: ['Free textbooks', '#B7A4FF'], libretexts: ['Free textbooks and course pages', '#A8F0FF'], memoryoftheworld: ['eBooks', '#FF9FE8'], royallib: ['eBooks', '#FFC070'],
-    audiobookbay: ['Audiobooks · magnet links', '#2EE6F6'], librivox: ['Audiobooks · volunteer recordings', '#FFB4A2'], audiobooksbee: ['Audiobooks · download pages', '#8FD0FF'],
-};
 const STATE_TEXT = { ok: ['Answering', '#5EEAB4'], slow: ['Slow on the last search', '#FFD54A'], error: ['Failed on the last search', '#FF8A65'], needsHuman: ['Needs a human', '#FFD54A'], off: ['Switched off', '#C9C5F2'], guest: ['Working as a guest', '#5EEAB4'] };
 const TOKEN_COLOURS = ['#8FD0FF', '#FFB4A2', '#B7A4FF', '#FFD54A', '#FF9FE8', '#5EEAB4', '#A8F0FF'];
 const PILL_COLOURS = ['#FFB4A2', '#8FD0FF', '#B7A4FF', '#5EEAB4', '#FFD54A', '#FF9FE8', '#FFC070', '#A8F0FF'];
@@ -158,7 +153,7 @@ function libraries() {
         <section aria-label="Working libraries" class="sset" style="gap:16px">
             <div class="items-h"><h3 class="h-sub" style="font-size:26px">Awake and answering <span class="count">${answering.filter(l => !off.has(l.id)).length}</span></h3><span class="desc" style="font-size:14px">Switch off any you never use and searches get quicker.</span></div>
             <div class="libgrid">${answering.map(l => {
-                const [info, colour] = SRC_INFO[l.id] || ['', '#FBF8FF'];
+                const info = l.info || '', colour = l.colour || '#FBF8FF';
                 const [stText, stCol] = STATE_TEXT[l.state] || STATE_TEXT.ok;
                 return `<div class="lib" style="border-top-color:${colour}"><div class="lh"><b>${esc(l.name)}</b>${sw(!off.has(l.id), l.name, `data-src="${l.id}"`)}</div>
                     <span class="desc" style="font-size:14px">${esc(info)}</span><span class="lst" style="color:${stCol}">${stText}${l.ms != null && l.state !== 'off' ? ' · ' + (l.ms < 1000 ? l.ms + ' ms' : (l.ms / 1000).toFixed(1) + ' s') : ''}</span></div>`;
