@@ -1,3 +1,4 @@
+# Not pinned by digest, so each release build gets the latest Node 24 and Debian security fixes.
 FROM node:24-slim
 WORKDIR /app
 
