@@ -239,6 +239,7 @@ async function startSearch(q, adv, fromDiscover) {
         } else {
             // A repeat search answered from memory: everything at once.
             const j = await res.json();
+            if (seq !== S.seq) return; // a newer search started meanwhile: this answer is not for it
             S.sources = Object.keys(j.meta || {}).filter(k => k in LIBS && (j.meta[k] > 0));
             S.answered = S.sources.slice();
             onEvent({ final: j }, flow);
@@ -293,9 +294,8 @@ function pumpResolve() {
             const res = S.results.find(x => x.id === id); if (res) res.linkType = 'page';
         }).finally(() => {
             resolving.delete(id);
-            if (seq !== S.seq) return;
-            S.resolved++;
-            if (location.pathname === '/results') refreshSoon();
+            // A slot freed by an older search goes to the current one's queue, which may be waiting for it.
+            if (seq === S.seq) { S.resolved++; if (location.pathname === '/results') refreshSoon(); }
             pumpResolve();
         });
     }
@@ -925,8 +925,9 @@ function onClick(e) {
             S.mode = t.dataset.v;
             $$('[data-act="mode"]').forEach(b => b.setAttribute('aria-checked', b.dataset.v === S.mode));
             $$('#adv [data-fmt]').forEach(g => { g.hidden = g.dataset.fmt !== S.mode; });
-            // On the results page the switch is live: search again in the other kind.
-            if (location.pathname === '/results' && S.q) searchAgain(S.q, S.adv);
+            // On the results page the switch is live: search again in the other kind, without the formats of the
+            // kind just left (an ebook format would filter out every audiobook).
+            if (location.pathname === '/results' && S.q) searchAgain(S.q, S.adv && { ...S.adv, formats: S.adv.formats.filter(f => FORMATS[S.mode].includes(f)) });
             return;
         }
         case 'adv': return toggleAdv();
