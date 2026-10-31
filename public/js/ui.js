@@ -377,6 +377,16 @@ export const sw = (on, label, attrs = '') => `<button type="button" class="switc
 export const segBtns = (opts, value, attrs = '') => opts.map(([v, label, ic]) => `<button type="button" role="radio" aria-checked="${v === value}" data-v="${esc(v)}" ${attrs}>${v === value && ic !== false ? icon('check', 16, 2.6) : ''}${esc(label)}</button>`).join('');
 export const chevron = (s = 16) => icon('chev', s, 2.6);
 
+// Keeps Tab and Shift+Tab inside an open dialog that is not a native <dialog> (those do it themselves), so
+// keyboard focus cannot wander off to the page behind it. Call from the dialog's keydown listener.
+export function trapTab(e, box) {
+    if (e.key !== 'Tab') return;
+    const all = $$('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])', box).filter(el => !el.disabled && el.getClientRects().length);
+    if (!all.length) return;
+    const first = all[0], last = all[all.length - 1], at = document.activeElement;
+    if (!box.contains(at) || (e.shiftKey ? at === first : at === last)) { e.preventDefault(); (e.shiftKey ? last : first).focus(); }
+}
+
 // A small confirm box. Resolves true when the person confirms. Escape or Cancel resolves false.
 export function confirmBox(title, text, okLabel = 'Delete', danger = true, noLabel = 'Cancel') {
     return new Promise(resolve => {

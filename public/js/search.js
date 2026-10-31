@@ -4,7 +4,7 @@
 // answers, then it rises into the results page's own bar while the results are uncovered behind it.
 // Results come as a shelf (spines, cassettes) or a list. Download to server works in place: the button
 // becomes a progress pill driven by the server's job events.
-import { $, $$, esc, api, icon, prefs, isPhone, size, toast, hideToast, toastId, copy, saveToDevice, sfx, anim,
+import { $, $$, esc, api, icon, prefs, isPhone, size, toast, hideToast, toastId, copy, saveToDevice, sfx, anim, trapTab,
     paletteFor, spineFor, coverPalette, genCover, shortTitle, mix, rgba, hash, chevron, clientId, privPath } from './ui.js';
 import { app, bus, go, setBg, drawNav } from './app.js';
 import { tidyName } from './rename.js';
@@ -163,8 +163,8 @@ function toggleAdv(force) {
     const open = force === undefined ? p.hidden : force;
     p.hidden = !open;
     $$('[data-act="adv"][aria-expanded]').forEach(b => b.setAttribute('aria-expanded', open));
-    // The phone sheet covers the screen, so the tab bar steps aside while it is open.
-    if (isPhone()) document.body.classList.toggle('bar-away', open);
+    // The phone sheet covers the screen, so the tab bar steps aside while it is open and Tab stays inside it.
+    if (isPhone()) { document.body.classList.toggle('bar-away', open); p.setAttribute('aria-modal', 'true'); }
     if (open) {
         anim(p, isPhone() ? [{ opacity: 0, transform: 'translateY(60px)' }, { opacity: 1, transform: 'none' }] : [{ opacity: 0, transform: 'translateY(-10px)' }, { opacity: 1, transform: 'none' }], { duration: 280 });
         // Start from what is already in the search bar, so the panel refines the search instead of replacing it.
@@ -1015,15 +1015,19 @@ function onKey(e) {
         const c = $('.pulled'); if (c) c.focus({ preventScroll: true });
     }
     if (e.key === 'Escape' && $('#adv') && !$('#adv').hidden) { toggleAdv(false); $('.advbtn') && $('.advbtn').focus(); }
+    // The phone sheet covers the screen, so Tab goes round inside it.
+    if (isPhone() && $('#adv') && !$('#adv').hidden) trapTab(e, $('#adv'));
     if (e.key === 'Enter' && e.target.id === 'q') { e.preventDefault(); $('#dform').requestSubmit(); }
 }
 function step(d) {
     const list = filtered(), i = list.findIndex(x => x.id === S.sel);
     const n = list[Math.max(0, Math.min(list.length - 1, i + d))];
-    // Keep keyboard focus on the arrow that was used, which the redraw would otherwise drop.
-    const a = document.activeElement, kept = a && a.matches('[data-act="step"]') ? `[data-act="step"][data-v="${a.dataset.v}"]` : '';
+    // Keep keyboard focus where it was (the arrow button that was used, or the shelf), which the redraw would
+    // otherwise drop.
+    const a = document.activeElement, kept = a && a.matches('[data-act="step"]') ? `[data-act="step"][data-v="${a.dataset.v}"]` : a && a.closest('.spine, .tape, .pulled') ? '.pulled' : '';
     if (n) select(n.id);
-    if (kept) { const b = $(kept); if (b && !b.disabled) b.focus({ preventScroll: true }); }
+    // At either end the arrow button turns disabled and cannot hold focus, so it goes to the book instead.
+    if (kept) { const b = $(kept), c = $('.pulled'); if (b && !b.disabled) b.focus({ preventScroll: true }); else if (c) c.focus({ preventScroll: true }); }
 }
 // Phone: swipe the cover or the card sideways for the next or previous result.
 let swipe = null;

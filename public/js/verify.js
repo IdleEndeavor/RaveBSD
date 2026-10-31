@@ -1,6 +1,6 @@
 // The verification view: the RaveBSD server's own browser, shown as pictures, so a person can pass
 // a site's human check (Anna's Archive or Z-Library) from any device (clicks and keys go back to it). RaveBSD never solves it.
-import { $, esc, isPhone } from './ui.js';
+import { $, esc, isPhone, trapTab } from './ui.js';
 
 const post = (path, body) => fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}), credentials: 'same-origin' });
 
@@ -73,7 +73,7 @@ export function openVerify(onDone, site = 'annas') {
     });
     $('#v-close', ov).addEventListener('click', () => { post('/browser/verify', { action: 'stop' }).catch(() => {}); close(false); });
     $('#v-close', ov).focus();
-    ov.addEventListener('keydown', e => { if (e.key === 'Escape' && !e.defaultPrevented) $('#v-close', ov).click(); });
+    ov.addEventListener('keydown', e => { if (e.key === 'Escape' && !e.defaultPrevented) $('#v-close', ov).click(); trapTab(e, ov); });
     post('/browser/verify', { action: 'start', site, phone: isPhone() }).then(r => r.json()).then(r => {
         if (!r.ok) { running = false; status.innerHTML = esc(r.reason || 'Could not start the background browser.'); return; }
         tick();
