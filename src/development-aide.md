@@ -37,7 +37,7 @@ Everything that runs on the RaveBSD server. Plain Node 24 ES modules, no framewo
 
 ## Where things are listed
 
-- **Sources**: the header comment of `sources.js` has the recipe for a new one. Each source also appears in `LIBRARIES` (`server.js`), `LIBS` (`public/js/search.js`) and `SRC_INFO` (`public/js/settings.js`), and its parser has a test in `test/sources.test.mjs`.
+- **Sources**: one entry each in `SOURCES` (`sources.js`), whose header comment has the recipe for a new one. The admin panel's list (`LIBRARIES` in `server.js`) and the page's library names (`libraries` in `/api/settings`) are built from it. Each parser has a test in `test/sources.test.mjs`.
 - **Settings**: a key in `DEFAULTS` (`config.js`), plus `CHOICES` for a choice, is saved, validated and sent to admins automatically. Non-admins only see what `viewSettings` in `server.js` passes on. The controls are drawn in `public/js/settings.js`.
 - **API routes**: all live in `api()` in `server.js`, and are admin only unless listed in `OPEN`.
 
