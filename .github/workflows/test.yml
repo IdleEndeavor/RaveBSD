@@ -1,0 +1,31 @@
+# Runs the tests on every pull request, so a change that breaks them shows up before it is merged.
+# publish.yml runs the same tests again on main before it builds the image.
+name: Test
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to the same pull request cancels the run that is still going for the old one.
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      # --ignore-scripts skips the postinstall that downloads the browser; the tests do not need it.
+      - run: npm ci --ignore-scripts
+      - run: npm test
