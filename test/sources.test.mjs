@@ -261,6 +261,8 @@ console.log('All sources tests passed.');
     assert.equal(rs[1].directUrl, 'https://standardebooks.org/ebooks/leo-tolstoy/war-and-peace/louise-maude_aylmer-maude/downloads/leo-tolstoy_war-and-peace_louise-maude-aylmer-maude.epub?source=download', 'translators: _ inside a segment becomes -');
     assert.deepEqual([rs[2].title, rs[2].author], ['Two & One', 'A, B']);
     assert.deepEqual(parseStandardEbooks('<p>No ebooks found.</p>'), []);
+    // Placeholders for books not yet in the public domain have no files.
+    assert.deepEqual(parseStandardEbooks(item('/ebooks/j-r-r-tolkien/the-hobbit', 'The Hobbit', ['J. R. R. Tolkien']).replace('about="/ebooks/j-r-r-tolkien/the-hobbit"', 'about="/ebooks/j-r-r-tolkien/the-hobbit" class="ribbon not-pd"')), []);
     console.log('parseStandardEbooks: ok');
 }
 

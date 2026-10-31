@@ -908,7 +908,8 @@ export function parseStandardEbooks(html) {
     const out = [];
     for (const li of String(html || '').split('<li typeof="schema:Book"').slice(1)) {
         const book = (li.match(/^\s*about="(\/ebooks\/[^"?#]+)"/) || [])[1];
-        if (!book) continue;
+        // Books not yet in the public domain are listed as placeholders with no files.
+        if (!book || /^[^>]*\bnot-pd\b/.test(li)) continue;
         const title = strip((li.match(/<span property="schema:name">([\s\S]*?)<\/span>/) || [])[1]);
         const authors = [...li.matchAll(/property="schema:author"[\s\S]*?<span property="schema:name">([\s\S]*?)<\/span>/g)].map(m => strip(m[1]));
         const name = book.split('/').slice(2).map(s => s.replace(/_/g, '-')).join('_');
