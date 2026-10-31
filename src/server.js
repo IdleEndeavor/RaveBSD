@@ -18,6 +18,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { pipeline } from 'node:stream';
 import core, { setUserAgentMode, setCreds, annasStatus, annasVerifyUrl, annasPageState, annasRecheck, zlibStatus, zlibVerifyUrl, zlibPageState, zlibRecheck, mobilismStatus,
     setResultDecorator, setSourcesOff, setSearchGate, sourceHealth, getResult, currentUA } from './sources.js';
 import { setProfileDir, ensureBrowser, browserAvailable, restartBrowser, startVerification, verificationFrame, verificationHtml, verificationInput, stopVerification, reloadVerification, browserSandboxed } from './browser.js';
@@ -28,7 +29,7 @@ import * as qbit from './qbit.js';
 import { vpn, checkVpn, switchExit, vpnBlocks, onVpnChange } from './vpn.js';
 import { zipFolder, zipSize } from './zip.js';
 import { refreshSlum, slumSummary } from './slum.js';
-import { fetchPublic } from './netguard.js';
+import { fetchPublic, readCapped } from './netguard.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const RENAME_JS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'rename.js');
@@ -483,9 +484,8 @@ async function sendCover(res, url, me) {
         try {
             const r = await fetchPublic(src, { headers: { 'User-Agent': currentUA(), Accept: 'image/*' }, signal: AbortSignal.timeout(8000) });
             const type = r.headers.get('content-type') || '';
-            const buf = Buffer.from(await r.arrayBuffer());
-            if (!r.ok || !/^image\/(jpeg|png|webp|gif|avif)/.test(type) || buf.length > 3e6) throw new Error('not an image');
-            hit = { type, buf };
+            if (!r.ok || !/^image\/(jpeg|png|webp|gif|avif)/.test(type)) { if (r.body) r.body.cancel().catch(() => {}); throw new Error('not an image'); }
+            hit = { type, buf: await readCapped(r, 3e6) };
         } catch (e) { hit = { missing: true }; }
         covers.set(src, hit);
         coverBytes += hit.buf ? hit.buf.length : 0;
@@ -522,11 +522,12 @@ function sendShelfFile(req, res, id, url, me) {
         let start = m[1] ? +m[1] : Math.max(0, size - +m[2]), end = m[1] && m[2] ? Math.min(+m[2], size - 1) : size - 1;
         if (start >= size || start > end) { res.writeHead(416, { 'Content-Range': `bytes */${size}`, ...SECURITY }).end(); return; }
         res.writeHead(206, { 'Content-Type': 'application/octet-stream', 'Content-Length': end - start + 1, 'Content-Range': `bytes ${start}-${end}/${size}`, 'Accept-Ranges': 'bytes', 'Content-Disposition': disp, ...SECURITY });
-        fs.createReadStream(f.path, { start, end }).on('end', () => { if (end === size - 1) done(); }).pipe(res);
+        // pipeline: a file removed or unreadable mid-send ends this answer, not the server.
+        pipeline(fs.createReadStream(f.path, { start, end }).on('end', () => { if (end === size - 1) done(); }), res, () => {});
         return;
     }
     res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': size, 'Accept-Ranges': 'bytes', 'Content-Disposition': disp, ...SECURITY });
-    fs.createReadStream(f.path).on('end', done).pipe(res);
+    pipeline(fs.createReadStream(f.path).on('end', done), res, () => {});
 }
 
 // Without a password, the only thing stopping another website from changing settings or deleting books is
