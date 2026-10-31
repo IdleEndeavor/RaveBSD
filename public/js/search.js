@@ -9,12 +9,9 @@ import { $, $$, esc, api, icon, prefs, isPhone, size, toast, hideToast, toastId,
 import { app, bus, go, setBg, drawNav } from './app.js';
 import { tidyName } from './rename.js';
 
-const LIBS = {
-    libgen: 'LibGen', annas: "Anna's Archive", archive: 'Internet Archive', gutenberg: 'Project Gutenberg', openstax: 'OpenStax',
-    libretexts: 'LibreTexts', memoryoftheworld: 'Memory of the World', royallib: 'RoyalLib', zlibrary: 'Z-Library', mobilism: 'Mobilism',
-    audiobookbay: 'AudiobookBay', librivox: 'LibriVox', audiobooksbee: 'AudiobooksBee',
-};
-const SHORT_SRC = { 'Library Genesis': 'LIBGEN', "Anna's Archive": "ANNA'S", 'Internet Archive': 'ARCHIVE', 'Project Gutenberg': 'GUTENBERG', 'Memory of the World': 'MOTW', 'Z-Library': 'Z-LIBRARY' };
+// Library names by id, from the server's source registry.
+const libNames = () => (app.settings && app.settings.libraries) || {};
+const SHORT_SRC = { 'Library Genesis': 'LIBGEN', "Anna's Archive": "ANNA'S", 'Internet Archive': 'ARCHIVE', 'Project Gutenberg': 'GUTENBERG', 'Memory of the World': 'MOTW', 'Z-Library': 'Z-LIBRARY', 'Standard Ebooks': 'STANDARD' };
 const srcName = s => (s === 'Library Genesis' ? 'LibGen' : s || '');
 const srcShort = s => SHORT_SRC[s] || String(s || '').toUpperCase();
 const LINK = {
@@ -240,7 +237,7 @@ async function startSearch(q, adv, fromDiscover) {
             // A repeat search answered from memory: everything at once.
             const j = await res.json();
             if (seq !== S.seq) return; // a newer search started meanwhile: this answer is not for it
-            S.sources = Object.keys(j.meta || {}).filter(k => k in LIBS && (j.meta[k] > 0));
+            S.sources = Object.keys(j.meta || {}).filter(k => k in libNames() && (j.meta[k] > 0));
             S.answered = S.sources.slice();
             onEvent({ final: j }, flow);
         }
@@ -328,7 +325,7 @@ function discoverFlow(seq) {
         const n = S.sources.length;
         const next = S.sources.find(s => !S.answered.includes(s));
         const done = S.answered.length;
-        if (n) label.textContent = next ? (phone ? `${LIBS[next] || next}…  ${Math.min(done + 1, n)} of ${n}` : `Asking ${LIBS[next] || next}…   ${Math.min(done + 1, n)} of ${n}`) : `${n} of ${n}`;
+        if (n) label.textContent = next ? (phone ? `${libNames()[next] || next}…  ${Math.min(done + 1, n)} of ${n}` : `Asking ${libNames()[next] || next}…   ${Math.min(done + 1, n)} of ${n}`) : `${n} of ${n}`;
         if (n) setFill(done / n * 85);
         // Stop waiting for slow libraries once most have answered and there is something to show.
         if (done >= n && n) allInResolve();
@@ -619,7 +616,7 @@ function heading(list) {
     }
     if (S.toResolve && pending > 0) parts.push(`finding direct links ${S.resolved}/${S.toResolve}`);
     // Libraries that ran out of time or failed are named, so a thin result list has an explanation.
-    const missed = Object.entries(S.status).filter(([, st]) => st === 'timeout' || st === 'error').map(([k]) => LIBS[k] || k);
+    const missed = Object.entries(S.status).filter(([, st]) => st === 'timeout' || st === 'error').map(([k]) => libNames()[k] || k);
     if (missed.length && !S.searching) parts.push(`${missed.join(', ')} did not answer in time`);
     const progress = total ? (answered / total) * (S.toResolve ? 0.5 + 0.5 * S.resolved / S.toResolve : 1) : 0;
     const busy = (total && answered < total) || pending > 0 || S.searching;

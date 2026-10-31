@@ -20,7 +20,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pipeline } from 'node:stream';
 import core, { setUserAgentMode, setCreds, annasStatus, annasVerifyUrl, annasPageState, annasRecheck, zlibStatus, zlibVerifyUrl, zlibPageState, zlibRecheck, mobilismStatus,
-    setResultDecorator, setSourcesOff, setSearchGate, sourceHealth, getResult, currentUA } from './sources.js';
+    setResultDecorator, setSourcesOff, setSearchGate, sourceHealth, getResult, currentUA, SOURCES } from './sources.js';
 import { setProfileDir, ensureBrowser, browserAvailable, restartBrowser, startVerification, verificationFrame, verificationHtml, verificationInput, stopVerification, reloadVerification, browserSandboxed } from './browser.js';
 import { DATA, settings, saveSettings, patchSettings, publicSettings, isPublic, publicForced, accessMode, statsFor, clearStats, stats, restoreStats } from './config.js';
 import * as auth from './auth.js';
@@ -66,22 +66,10 @@ setResultDecorator(jobs.decorateResult);
 setSearchGate(() => (vpnBlocks() ? 'The VPN tunnel is down, so searching is paused until it is back' : ''));
 
 // ── Libraries ────────────────────────────────────────────────────────────────
-// The sources RaveBSD asks itself. kinds says which searches each one answers.
-const LIBRARIES = [
-    { id: 'libgen', name: 'LibGen', kinds: ['ebooks'] },
-    { id: 'archive', name: 'Internet Archive', kinds: ['ebooks', 'audiobooks'] },
-    { id: 'gutenberg', name: 'Project Gutenberg', kinds: ['ebooks'] },
-    { id: 'openstax', name: 'OpenStax', kinds: ['ebooks'] },
-    { id: 'libretexts', name: 'LibreTexts', kinds: ['ebooks'] },
-    { id: 'memoryoftheworld', name: 'Memory of the World', kinds: ['ebooks'] },
-    { id: 'royallib', name: 'RoyalLib', kinds: ['ebooks'] },
-    { id: 'zlibrary', name: 'Z-Library', kinds: ['ebooks'] },
-    { id: 'annas', name: "Anna's Archive", kinds: ['ebooks'] },
-    { id: 'mobilism', name: 'Mobilism', kinds: ['ebooks', 'audiobooks'] },
-    { id: 'audiobookbay', name: 'AudiobookBay', kinds: ['audiobooks'] },
-    { id: 'librivox', name: 'LibriVox', kinds: ['audiobooks'] },
-    { id: 'audiobooksbee', name: 'AudiobooksBee', kinds: ['audiobooks'] },
-];
+// The sources RaveBSD asks itself (the registry in sources.js). kinds says which searches each one answers.
+const LIBRARIES = SOURCES.map(({ id, name, kinds, info = '', colour = '' }) => ({ id, name, kinds, info, colour }));
+// Their names, for the page's loading bar and "did not answer" line.
+const LIBRARY_NAMES = Object.fromEntries(SOURCES.map(s => [s.id, s.name]));
 
 async function libraryStatus() {
     const c = applyCreds();
@@ -245,13 +233,13 @@ function viewSettings(me) {
         const { ebookDir, audioDir, ebookTemplate, audioTemplate } = all.shelves;
         return { access: { mode: all.access.mode, publicForced: all.access.publicForced }, shelves: { ebookDir, audioDir, ebookTemplate, audioTemplate }, qbit: { url: all.qbit.url } };
     }
-    if (me.role === 'admin') return all;
+    if (me.role === 'admin') return { ...all, libraries: LIBRARY_NAMES };
     const { ebookTemplate, audioTemplate, rename, tidy } = all.shelves;
     return {
         access: { mode: all.access.mode }, searching: all.searching, saving: all.saving, notify: all.notify, justLinks: all.justLinks,
         visitors: all.visitors, qbit: { enabled: all.qbit.enabled, directSlots: all.qbit.directSlots }, sources: { slum: all.sources.slum },
         system: { badges: all.system.badges }, vpn: { enabled: all.vpn.enabled, tellOnDrop: all.vpn.tellOnDrop }, storage: { lowSpaceGB: all.storage.lowSpaceGB },
-        shelves: { ebookTemplate, audioTemplate, rename, tidy },
+        shelves: { ebookTemplate, audioTemplate, rename, tidy }, libraries: LIBRARY_NAMES,
     };
 }
 // A shelf item as a non-admin sees it: its place inside the shelf, not on the disk.
@@ -305,18 +293,18 @@ async function api(req, res, url, me) {
         if (!['private', 'public', 'family'].includes(b.mode)) return fail(res, 'Unknown mode');
         if (b.mode !== 'private' && !auth.hasAdmin()) return fail(res, 'Make an admin account first');
         settings.access.mode = b.mode; saveSettings();
-        return send(res, 200, publicSettings());
+        return send(res, 200, viewSettings(me));
     }
     if (p === '/api/users' && m === 'POST') {
         const b = await json(req);
-        try { auth.addUser(b.username, b.password, b.role); return send(res, 200, publicSettings()); } catch (e) { return fail(res, e); }
+        try { auth.addUser(b.username, b.password, b.role); return send(res, 200, viewSettings(me)); } catch (e) { return fail(res, e); }
     }
     if ((mm = p.match(/^\/api\/users\/([a-z0-9]+)$/)) && m === 'DELETE') {
-        try { auth.removeUser(mm[1]); return send(res, 200, publicSettings()); } catch (e) { return fail(res, e); }
+        try { auth.removeUser(mm[1]); return send(res, 200, viewSettings(me)); } catch (e) { return fail(res, e); }
     }
     if ((mm = p.match(/^\/api\/users\/([a-z0-9]+)\/password$/)) && m === 'POST') {
         const b = await json(req);
-        try { auth.setUserPassword(mm[1], b.password); return send(res, 200, publicSettings()); } catch (e) { return fail(res, e); }
+        try { auth.setUserPassword(mm[1], b.password); return send(res, 200, viewSettings(me)); } catch (e) { return fail(res, e); }
     }
     // Anyone with an account changes their own password; their other sessions end, this one carries on.
     if (p === '/api/me/password' && m === 'POST') {

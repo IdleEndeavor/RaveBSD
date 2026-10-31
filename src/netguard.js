@@ -46,6 +46,12 @@ export async function assertPublicUrl(url) {
     if (!addrs.length || addrs.some(isPrivateIp)) throw new Error('That link points inside a private network');
 }
 
+// Cookies and credentials sent to the first site never follow a redirect to another one, as in a browser.
+export function redirectInit(init, from, to) {
+    if (new URL(from).origin === new URL(to).origin || !init.headers) return init;
+    return { ...init, headers: Object.fromEntries([...new Headers(init.headers)].filter(([k]) => k !== 'cookie' && k !== 'authorization')) };
+}
+
 // fetch() that follows at most 5 redirects itself, checking each address first.
 // ponytail: the name is looked up here and again by fetch, so a DNS server answering differently the second time
 // could still reach a private address; pin the checked address with an undici Agent (connect.lookup) to close it.
@@ -56,6 +62,7 @@ export async function fetchPublic(url, init = {}) {
         const res = await fetch(current, { ...init, redirect: 'manual' });
         if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
             current = new URL(res.headers.get('location'), current).href;
+            init = redirectInit(init, url, current);
             if (res.body) res.body.cancel().catch(() => {});
             continue;
         }
