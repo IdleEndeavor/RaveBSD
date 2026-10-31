@@ -241,11 +241,15 @@ for (const mode of ['public', 'family']) {
         assert.equal(await asHost('nas.local'), 200);
         console.log('private host check: ok');
         // No password, no keys: the API is open. Once a key exists, it is needed, though everyone here is the admin.
-        assert.equal((await s.call('GET', '/api/v1/search')).status, 400, 'open API (400: no query)');
+        const open = await s.call('GET', '/api/v1/search');
+        assert.equal(open.status, 400, 'open API (400: no query)');
+        assert.equal(open.headers.get('access-control-allow-origin'), null, 'without a key, other websites cannot read the answers');
         const { key } = (await s.call('POST', '/api/keys', { body: { label: 'script' } })).json;
         assert.equal((await s.call('GET', '/api/v1/search')).status, 401, 'key needed once one exists');
         assert.equal((await s.call('GET', '/api/v1/search', { headers: { 'X-API-Key': 'rbsd_wrong' } })).status, 401, 'wrong key');
-        assert.equal((await s.call('GET', '/api/v1/search', { headers: { 'X-API-Key': key } })).status, 400, 'right key');
+        const keyed = await s.call('GET', '/api/v1/search', { headers: { 'X-API-Key': key } });
+        assert.equal(keyed.status, 400, 'right key');
+        assert.equal(keyed.headers.get('access-control-allow-origin'), '*', 'with a key, scripts on other websites can read them');
         // Scripts on other websites: the preflight answers without a key; the page's own routes stay same-site.
         const pre = await s.call('OPTIONS', '/api/v1/search', { headers: { 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'x-api-key' } });
         assert.equal(pre.status, 204, 'preflight');
@@ -256,6 +260,20 @@ for (const mode of ['public', 'family']) {
         await s.call('POST', '/api/restore', { body: { app: 'RaveBSD', settings: { access: { mode: 'family' } } } });
         assert.equal((await s.call('GET', '/api/session')).json.mode, 'private', 'family needs an admin');
         console.log('API keys and restore: ok');
+    } finally { s.proc.kill(); }
+}
+// Password guessing: a new name for every try does not get past the per-address limit.
+{
+    const s = await start('family', { name: 'login-limit' });
+    try {
+        const statuses = [];
+        for (let i = 0; i < 31; i++) statuses.push((await s.call('POST', '/api/login', { body: { username: 'guess' + i, password: 'x' } })).status);
+        assert.deepEqual([...new Set(statuses.slice(0, 30))], [401], 'wrong guesses are refused');
+        assert.equal(statuses[30], 429, 'the 31st try from one address waits, whatever the name');
+        const b = await s.call('GET', '/api/backup', { cookie: s.admin });
+        assert.equal(b.headers.get('cache-control'), 'no-store', 'the backup, with every secret, is never cached');
+        assert.notEqual((await s.call('POST', '/api/backup', { cookie: s.admin })).status, 200, 'and only answers GET');
+        console.log('login limit and backup: ok');
     } finally { s.proc.kill(); }
 }
 // Before setup: an upgraded 1.x install's logins and the server's other routes are out of reach; setup's own work.

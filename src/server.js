@@ -316,7 +316,7 @@ async function api(req, res, url, me) {
     if (p === '/api/me/password' && m === 'POST') {
         if (!me.user) return fail(res, 'Sign in first', 401);
         const b = await json(req);
-        if (!auth.checkLogin(me.user.username, b.current)) return fail(res, 'The current password is not right', 403);
+        if (!(await auth.checkLogin(me.user.username, b.current))) return fail(res, 'The current password is not right', 403);
         try { const u = auth.setUserPassword(me.user.id, b.password); return send(res, 200, { ok: true }, { 'Set-Cookie': auth.sessionCookie(u, secure(req)) }); }
         catch (e) { return fail(res, e); }
     }
@@ -395,9 +395,10 @@ async function api(req, res, url, me) {
         return send(res, 200, { enabled: settings.statsEnabled, period, ...statsFor(period), shelf: jobs.shelfBytes(), disk: e.total >= a.total ? e : a, sameDisk: e.total === a.total && Math.abs(e.free - a.free) < 1e9 });
     }
 
-    if (p === '/api/backup') {
+    if (p === '/api/backup' && m === 'GET') {
         const data = { app: 'RaveBSD', version: VERSION, at: new Date().toISOString(), settings, stats, shelf: jobs.shelfBackup() };
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Disposition': `attachment; filename="ravebsd-backup-${new Date().toISOString().slice(0, 10)}.json"`, ...SECURITY });
+        // It holds every secret: never kept by a browser or proxy cache.
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Content-Disposition': `attachment; filename="ravebsd-backup-${new Date().toISOString().slice(0, 10)}.json"`, ...SECURITY });
         return res.end(JSON.stringify(data, null, 1));
     }
     if (p === '/api/restore' && m === 'POST') {
@@ -568,9 +569,9 @@ const server = http.createServer(async (req, res) => {
             const ip = ipOf(req);
             const b = await json(req);
             const who = ip + '|' + String(b.username || '').trim().toLowerCase();
-            if (!auth.loginAllowed(who)) return fail(res, 'Too many tries. Wait a few minutes.', 429);
-            const u = auth.checkLogin(b.username, b.password);
-            if (!u) { auth.noteFailedLogin(who); return fail(res, 'That username and password do not match', 401); }
+            if (!auth.loginAllowed(who) || !auth.loginAllowed('ip|' + ip, 30)) return fail(res, 'Too many tries. Wait a few minutes.', 429);
+            const u = await auth.checkLogin(b.username, b.password);
+            if (!u) { auth.noteFailedLogin(who); auth.noteFailedLogin('ip|' + ip); return fail(res, 'That username and password do not match', 401); }
             if (u.role !== 'admin' && accessMode() !== 'family') return fail(res, 'That account is for friends and family mode, which is off right now', 403);
             return send(res, 200, { ok: true }, { 'Set-Cookie': auth.sessionCookie(u, secure(req)) });
         }
@@ -623,9 +624,11 @@ const server = http.createServer(async (req, res) => {
         if (p.startsWith('/api/') && !p.startsWith('/api/v1/')) return await api(req, res, url, me);
 
         const r = await core.fetch(new Request(url, { method: req.method, headers: req.headers }), {}, { waitUntil: q => q.catch(() => {}), passThroughOnException() {} });
-        // Other websites may read the scripting API (/api/v1, key-protected), not the page's own search routes.
+        // Other websites may read the scripting API (/api/v1) when they send a valid key, never the page's own search
+        // routes. Without a key (private mode with no password needs none) its answers carry this server's shelf
+        // marks, so they stay unreadable to other websites the owner happens to visit.
         const hdrs = Object.fromEntries(r.headers);
-        if (!p.startsWith('/api/v1/')) for (const k of Object.keys(hdrs)) if (k.startsWith('access-control-')) delete hdrs[k];
+        if (!p.startsWith('/api/v1/') || !auth.apiKeyOk(req)) for (const k of Object.keys(hdrs)) if (k.startsWith('access-control-')) delete hdrs[k];
         res.writeHead(r.status, { ...hdrs, ...SECURITY });
         if (!r.body) { res.end(); return; }
         // Streamed so the progress events of /search/all?stream=1 reach the page as they happen. Answers are cached
