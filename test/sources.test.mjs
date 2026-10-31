@@ -335,6 +335,13 @@ console.log('All sources tests passed.');
     assert.equal(lectulandiaFileUrl('<p>no links</p>'), null);
     assert.equal(lectulandiaFileUrl('<a href="/download.php?t=1&d=Li4vLi4vZXRj">'), null, 'a code that is not one is refused');
     assert.deepEqual(await fileRequest('https://files.example/a.epub'), { url: 'https://files.example/a.epub', headers: {} }, 'other hosts are fetched as they are');
+    // The antupload session cookie stays with antupload when the file link redirects elsewhere.
+    const { redirectInit } = await import('../src/netguard.js');
+    const init = { signal: null, headers: { Cookie: 'laravel_session=x', Referer: 'https://www.antupload.com/file/a/', 'User-Agent': 'ua' } };
+    assert.equal(redirectInit(init, 'https://www.antupload.com/filed/a/b', 'https://www.antupload.com/other'), init, 'same site: unchanged');
+    assert.deepEqual(redirectInit(init, 'https://www.antupload.com/filed/a/b', 'https://cdn.example/f.epub').headers, { referer: 'https://www.antupload.com/file/a/', 'user-agent': 'ua' });
+    const ctrl = new AbortController(); ctrl.abort(new Error('Cancelled'));
+    await assert.rejects(fileRequest('https://www.antupload.com/file/abcd', ctrl.signal), /abort|Cancelled/i, 'a cancelled download stops before asking antupload');
     console.log('parseLectulandia: ok');
 }
 

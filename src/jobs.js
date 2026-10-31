@@ -267,7 +267,7 @@ async function runDirect(j) {
         if (url.startsWith('/dl/zlib')) { const u = new URL(url, 'http://x'); url = await zlibFileLink(u.searchParams.get('id') || '', u.searchParams.get('hash') || ''); }
         if (!/^https?:\/\//i.test(url)) throw new Error('Not a web link');
         // Some file hosts hand the file over only after their own page was opened (a session cookie and referrer).
-        let hostHeaders; ({ url, headers: hostHeaders } = await fileRequest(url));
+        let hostHeaders; ({ url, headers: hostHeaders } = await fileRequest(url, ctrl.signal));
         stall();
         let res; const failed = []; let rounds = 0;
         for (;;) {

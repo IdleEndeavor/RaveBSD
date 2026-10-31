@@ -1142,14 +1142,15 @@ async function resolveLectulandia(r) {
 
 // What to fetch for a file link. antupload's file page sets a session cookie and links the file, which is
 // only handed over with that cookie and the page as referrer. Other links are fetched as they are.
-export async function fileRequest(url) {
+export async function fileRequest(url, signal) {
     const m = String(url).match(/^https?:\/\/(?:www\.)?antupload\.com\/file\/([A-Za-z0-9]+)\/?$/);
     if (!m) return { url, headers: {} };
     const page = `https://www.antupload.com/file/${m[1]}/`;
-    const res = await get(page, 15000);
+    const res = await get(page, 15000, {}, signal ? { signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]) } : {});
+    if (!res.ok) { res.body?.cancel().catch(() => {}); throw new Error('antupload answered ' + res.status + '. Try again in a while.'); }
     const href = (String(await res.text()).match(/href="(\/filed\/[A-Za-z0-9]+\/[^"]*)"/) || [])[1];
     const cookie = res.headers.getSetCookie().map(c => c.split(';')[0]).join('; ');
-    if (!res.ok || !href) throw new Error('Stale link: the file is no longer on antupload');
+    if (!href) throw new Error('Stale link: the file is no longer on antupload');
     return { url: 'https://www.antupload.com' + href.replace(/&amp;/g, '&'), headers: { Referer: page, ...(cookie ? { Cookie: cookie } : {}) } };
 }
 
