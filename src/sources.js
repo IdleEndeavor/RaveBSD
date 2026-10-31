@@ -227,7 +227,9 @@ export async function withEdgeCache(keyUrl, ctx, ttlSec, produce) {
     return res;
 }
 
-function strip(s) {
+// A code point from a numeric entity, or nothing for one that is not a character (out of range, or half a pair).
+const entity = cp => (cp > 0 && cp <= 0x10ffff && !(cp >= 0xd800 && cp <= 0xdfff) ? String.fromCodePoint(cp) : '');
+export function strip(s) {
     return (s || '')
         .replace(/<[^>]+>/g, '')
         .replace(/&amp;/g,  '&')
@@ -236,7 +238,8 @@ function strip(s) {
         .replace(/&#39;/g,  "'")
         .replace(/&quot;/g, '"')
         .replace(/&nbsp;/g, ' ')
-        .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(n))
+        .replace(/&#(\d{1,8});/g, (_, n) => entity(+n))
+        .replace(/&#x([0-9a-f]{1,6});/gi, (_, h) => entity(parseInt(h, 16)))
         .replace(/\s+/g, ' ')
         .trim();
 }
@@ -282,13 +285,15 @@ function parseLibgenTitleCell(titleCell) {
 
 // Lowercase, punctuation stripped, spaces collapsed, so "Hollywood, Ending"
 // and "hollywood ending" compare equal.
-const normText = t => (t || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
+const normText = t => (t || '').toLowerCase().replace(/[^\p{L}\p{M}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
 
 // How well a result matches the search, from 0 to 1: the share of the search's meaningful words found in
 // the title, author or series. Small words ("the", "for", "is") don't count, accents are ignored and a plural
 // matches its singular, so "the word for world is forest" needs word, world and forest.
 const STOP = new Set('a an and the of for to in on at by with from is are was be or as it its his her de la le les el los las del der die das und et y du des un une'.split(' '));
-const fold = t => normText(String(t || '').normalize('NFD').replace(/\p{M}/gu, ''));
+// Only the accents of Latin, Greek and Cyrillic letters go: other scripts' marks (Japanese dakuten, Devanagari
+// vowel signs) change the word.
+const fold = t => normText(String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').normalize('NFC'));
 const stem = w => (w.length > 3 ? w.replace(/(?:es|s)$/, '') : w);
 function queryWords(q) {
     const all = fold(q).split(' ').filter(w => w.length > 1 || /\d/.test(w));
@@ -323,17 +328,18 @@ const isIsbnQuery = q => /(?:^|\D)(?:97[89])?\d{9}[\dx](?:\D|$)/i.test(String(q 
 // Share of the query's words found in the title or author. It lets "hollywood ending john green" rank
 // the real match above loosely related results.
 export function tokenCoverage(r, q) {
-    const words = normText(q).split(' ').filter(w => w.length > 1);
+    const words = fold(q).split(' ').filter(w => w.length > 1);
     if (!words.length) return 0;
-    const hay = ' ' + normText((r.title || '') + ' ' + (r.author || '')) + ' ';
+    const hay = ' ' + fold((r.title || '') + ' ' + (r.author || '')) + ' ';
     return words.filter(w => hay.includes(' ' + w + ' ')).length / words.length;
 }
 
 export function scoreResult(r, q) {
     let s = 0;
     const fmt  = (r.format   || '').toLowerCase();
-    const ttl  = normText(r.title);
-    const qn   = normText(q);
+    // Accents folded, as relevance() does: "cien anos" is the title "Cien años".
+    const ttl  = fold(r.title);
+    const qn   = fold(q);
     s += FORMAT_SCORE[fmt] || 0;
     // No language bonus: an English bonus used to push English editions up even for foreign-language
     // searches (for example "storia follia"). Title match, format and year already rank well.
@@ -1707,7 +1713,8 @@ export const langOf = l => { const s = String(l).trim().toLowerCase(); for (cons
 export function parseOpts(url) {
     const list = k => (url.searchParams.get(k) || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
     const y = (url.searchParams.get('year') || '').match(/^\s*(\d{4})(?:\s*-\s*(\d{4}))?\s*$/);
-    const lang = (url.searchParams.get('lang') || '').trim().toLowerCase().replace(/[^a-z]/g, '').slice(0, 20);
+    // Letters in any script ("español", "русский") and the hyphen of regional codes ("pt-br").
+    const lang = (url.searchParams.get('lang') || '').trim().toLowerCase().replace(/[^\p{L}\p{M}-]/gu, '').replace(/^-+|-+$/g, '').slice(0, 20);
     const title = (url.searchParams.get('q') && url.searchParams.get('title') || '').trim().slice(0, 300);
     return { formats: list('formats'), sources: list('sources'), yearFrom: y ? +y[1] : 0, yearTo: y ? +(y[2] || y[1]) : 0, lang, title };
 }
@@ -1792,6 +1799,9 @@ export async function resolveOne(id) {
 // The page gives up after 45s, so the deadlines below stay under that. Partial results beat none.
 const SEARCH_DEADLINE_MS = 30000;
 const RESOLVE_DEADLINE_MS = 12000;
+// The retry by title words shares the search's time: what is left of it, or at least a few seconds.
+const TITLE_RETRY_MIN_MS = 5000;
+export const titleRetryMs = (started, now = Date.now()) => Math.max(TITLE_RETRY_MIN_MS, SEARCH_DEADLINE_MS - (now - started));
 
 // onProgress is optional. The streaming route passes it and receives {sources:[names]} once, then
 // {done, count, status, results} each time a source finishes (results is the merged list so far).
@@ -1856,7 +1866,8 @@ async function runFullSearch(query, mode, resolveTopN, env, onProgress, opts) {
     const titleQ = opts.title || titleWordsOf(query, [].concat(...Object.values(byName)));
     const empty = jobs.filter(j => !byName[j.name].length && sourceHealth[j.name] && sourceHealth[j.name].status === 'ok');
     if (titleQ && fold(titleQ) !== fold(query) && empty.length) {
-        await Promise.allSettled(empty.map(j => withDeadline(j.fn(titleQ), SEARCH_DEADLINE_MS, []).then(v => {
+        const left = titleRetryMs(started);
+        await Promise.allSettled(empty.map(j => withDeadline(j.fn(titleQ), left, []).then(v => {
             if (!v.length || finished) return;
             byName[j.name] = v;
             resolveSoon(j.name, v);
