@@ -143,10 +143,20 @@ async function start(mode, { name = mode, env: extra = {}, seed, setup: doSetup 
         const res = await fetch(base + p, { method, headers: { 'Content-Type': 'application/json', Origin: base, ...(cookie ? { Cookie: cookie } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined, redirect: 'manual' });
         return { status: res.status, headers: res.headers, cookie: (res.headers.get('set-cookie') || '').split(';')[0], json: await res.json().catch(() => null) };
     };
-    if (!doSetup) return { proc, call, port };
+    // /events as a page opens it: ended() says whether the server closed it within a second.
+    const events = async cookie => {
+        const ctrl = new AbortController();
+        const res = await fetch(base + '/events', { headers: { Cookie: cookie }, signal: ctrl.signal });
+        assert.equal(res.status, 200, 'events open');
+        const reader = res.body.getReader();
+        await reader.read(); // hello
+        const ended = () => Promise.race([reader.read().then(r => r.done, () => true), sleep(1000).then(() => false)]);
+        return { ended, close: () => ctrl.abort() };
+    };
+    if (!doSetup) return { proc, call, port, events };
     const setup = await call('POST', '/api/setup', { body: { mode, admin: { username: 'boss', password: 'secret123' }, shelves: {}, qbit: { enabled: false } } });
     assert.equal(setup.status, 200, mode + ' setup');
-    return { proc, call, admin: setup.cookie, port };
+    return { proc, call, events, admin: setup.cookie, port };
 }
 
 const ADMIN_ONLY = [
@@ -216,10 +226,14 @@ for (const mode of ['public', 'family']) {
             s.admin = sw.cookie;
             roles.user = (await s.call('POST', '/api/login', { body: { username: 'kid', password: 'password1' } })).cookie;
             assert.equal((await s.call('POST', '/api/sessions/end', { cookie: roles.user })).status, 403, 'users cannot');
-            // Removing an account ends its sessions.
+            // Removing an account ends its sessions, and its open page's live events with them.
+            const stream = await s.events(roles.user), adminStream = await s.events(s.admin);
             const kid = (await s.call('GET', '/api/settings', { cookie: s.admin })).json.access.users.find(u => u.username === 'kid');
             await s.call('DELETE', '/api/users/' + kid.id, { cookie: s.admin });
             assert.equal((await s.call('GET', '/api/shelf', { cookie: roles.user })).status, 401, 'removed account signed out');
+            assert.equal(await stream.ended(), true, 'the removed account\'s events stop');
+            assert.equal(await adminStream.ended(), false, 'the admin\'s carry on');
+            adminStream.close();
             // A restore brings back the access mode.
             const backup = (await s.call('GET', '/api/backup', { cookie: s.admin })).json;
             await s.call('POST', '/api/mode', { body: { mode: 'private' }, cookie: s.admin });
