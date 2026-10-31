@@ -1,5 +1,5 @@
-# Pinned by digest so every build starts from the same base; Dependabot opens a pull request when it changes.
-FROM node:24-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c
+# Not pinned by digest, so each release build gets the latest Node 24 and Debian security fixes.
+FROM node:24-slim
 WORKDIR /app
 
 # The browser is used for Z-Library searches without an account and for Anna's Archive. For a much
