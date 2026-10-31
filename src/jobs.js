@@ -13,7 +13,7 @@ import crypto from 'node:crypto';
 import { EventEmitter, once } from 'node:events';
 import { DATA, settings, readJson, writeJson, setAside, cannotRead, countDownload, countSaved } from './config.js';
 import { applyTemplate, singleFileAudiobook, numberedPath, tidyName, safeSegment } from './rename.js';
-import { getResult, resolveOne, zlibFileLink, freshLibgenLink, currentUA, RESOLVABLE } from './sources.js';
+import { getResult, resolveOne, zlibFileLink, freshLibgenLink, currentUA, RESOLVABLE, fileRequest } from './sources.js';
 import * as qbit from './qbit.js';
 import { vpnBlocks } from './vpn.js';
 import { listFiles, extractZip } from './zip.js';
@@ -266,10 +266,12 @@ async function runDirect(j) {
         // Z-Library's account links are made on demand and count against the daily limit.
         if (url.startsWith('/dl/zlib')) { const u = new URL(url, 'http://x'); url = await zlibFileLink(u.searchParams.get('id') || '', u.searchParams.get('hash') || ''); }
         if (!/^https?:\/\//i.test(url)) throw new Error('Not a web link');
+        // Some file hosts hand the file over only after their own page was opened (a session cookie and referrer).
+        let hostHeaders; ({ url, headers: hostHeaders } = await fileRequest(url));
         stall();
         let res; const failed = []; let rounds = 0;
         for (;;) {
-            res = await fetchPublic(url, { signal: ctrl.signal, headers: { 'User-Agent': currentUA(), Accept: '*/*' } });
+            res = await fetchPublic(url, { signal: ctrl.signal, headers: { ...hostHeaders, 'User-Agent': currentUA(), Accept: '*/*' } });
             stall();
             if (res.status < 500 || !j.md5) break;
             if (res.body) res.body.cancel().catch(() => {});

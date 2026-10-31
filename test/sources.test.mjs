@@ -239,7 +239,7 @@ console.log('All sources tests passed.');
         assert.ok(s.kinds.length && s.kinds.every(k => k === 'ebooks' || k === 'audiobooks'), `${s.id}: kinds`);
         assert.equal(typeof s.search, 'function', `${s.id}: search`);
     }
-    assert.deepEqual([...RESOLVABLE].sort(), ['AudiobookBay', 'AudiobooksBee', "Anna's Archive", 'Ebookelo', 'Internet Archive', 'Library Genesis', 'RoyalLib'].sort());
+    assert.deepEqual([...RESOLVABLE].sort(), ['AudiobookBay', 'AudiobooksBee', "Anna's Archive", 'Ebookelo', 'Internet Archive', 'Lectulandia', 'Library Genesis', 'RoyalLib'].sort());
     // Asking for an unknown source, or one in a search it does not answer, never reaches a library.
     const res = await worker.fetch(new Request('http://x/search/nosuchlibrary?q=dune'), {}, { waitUntil() {} });
     assert.equal(res.status, 404);
@@ -310,3 +310,31 @@ console.log('All sources tests passed.');
     assert.equal(ebookeloMagnet('<p>countdown</p>'), '');
     console.log('parseEbookelo: ok');
 }
+
+// Lectulandia: book cards (search and author pages), the author list a search shows, and the file code in a book page.
+{
+    const { parseLectulandia, lectulandiaAuthors, lectulandiaFileUrl, fileRequest } = await import('../src/sources.js');
+    const card = `<article id="post-123264" class="card">
+    <a class="card-click-target" tabindex="-1" aria-hidden="true" href="/book/carl-el-mazmorrero/" title="" ></a>
+    <img class="cover" src="https://assets.lectulandia.com/b/ab/Matt%20Dinniman/Carl%20el%20Mazmorrero%20(1)/small.jpg" alt="Carl el Mazmorrero" />
+    <div class="details"><h2><a class="title" title="Carl el Mazmorrero" href="/book/carl-el-mazmorrero/">
+                Carl el Mazmorrero                <span class="paragraph-end"></span></a></h2>
+        <div class="subdetail"><a href="/autor/matt-dinniman/" rel="tag">Matt Dinniman</a>        </div>
+        <div class="subdetail"><a href="/serie/carl-el-mazmorrero/" rel="tag" title="Carl el Mazmorrero - Libro: 1">Carl el Mazmorrero - 1</a></div>
+    </div></article>`;
+    const [r] = parseLectulandia('<main>' + card + '</main>');
+    assert.deepEqual([r.title, r.author, r.series, r.language, r.format], ['Carl el Mazmorrero', 'Matt Dinniman', 'Carl el Mazmorrero 1', 'es', 'epub']);
+    assert.equal(r.pageUrl, 'https://ww3.lectulandia.com/book/carl-el-mazmorrero/');
+    assert.equal(r.coverUrl, 'https://assets.lectulandia.com/b/ab/Matt%20Dinniman/Carl%20el%20Mazmorrero%20(1)/small.jpg');
+    assert.deepEqual(parseLectulandia('<section class="no-results not-found"></section>'), []);
+    assert.deepEqual(lectulandiaAuthors('<div class="taxs"><ul><li><a class="term" href="/autor/matt-dinniman/">Matt Dinniman</a></li></ul></div>'), [['Matt Dinniman', '/autor/matt-dinniman/']]);
+    const book = `<div id="downloadContainer"><a rel="nofollow" target="_blank" href="/download.php?t=1&d=c1l2ZjR6U00v&ti=Carl+el+Mazmorrero"><input value="epub" /></a>
+        <a rel="nofollow" target="_blank" href="/download.php?t=2&d=ZUJaN0xRb3gv&ti=Carl+el+Mazmorrero"><input value="pdf" /></a></div>`;
+    assert.deepEqual(lectulandiaFileUrl(book), { url: 'https://www.antupload.com/file/sYvf4zSM', format: 'epub' }, 'the EPUB first; d is the code in base64');
+    assert.deepEqual(lectulandiaFileUrl(book.replace('t=1', 't=9').replace('t=2', 't=2')), { url: 'https://www.antupload.com/file/eBZ7LQox', format: 'pdf' });
+    assert.equal(lectulandiaFileUrl('<p>no links</p>'), null);
+    assert.equal(lectulandiaFileUrl('<a href="/download.php?t=1&d=Li4vLi4vZXRj">'), null, 'a code that is not one is refused');
+    assert.deepEqual(await fileRequest('https://files.example/a.epub'), { url: 'https://files.example/a.epub', headers: {} }, 'other hosts are fetched as they are');
+    console.log('parseLectulandia: ok');
+}
+

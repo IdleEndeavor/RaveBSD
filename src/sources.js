@@ -1075,6 +1075,84 @@ async function resolveEbookeloMagnet(r) {
     } catch(e) { /* no magnet: the result keeps its page link */ }
 }
 
+// ── Lectulandia ─────────────────────────────────────────────────────────────
+// Spanish ebooks. The search matches titles only; a search for an author lists that author's page instead, so
+// those pages are read too. Each book's page links its EPUB through download.php, whose d parameter is the
+// antupload.com file code in base64. antupload hands the file over only with the session cookie and referrer
+// of its own page, so the download asks for that page first (fileRequest).
+const LECTULANDIA = 'https://ww3.lectulandia.com';
+export function parseLectulandia(html) {
+    const out = [];
+    for (const c of String(html || '').split('<article ').slice(1)) {
+        const m = c.match(/<a class="title"[^>]*href="(\/book\/[^"]+\/)"[^>]*>([\s\S]*?)<\/a>/);
+        if (!m) continue;
+        const series = c.match(/href="\/serie\/[^"]+"[^>]*>([^<]*?)\s*-\s*(\d+)<\/a>/);
+        out.push({
+            title:       strip(m[2]) || 'Unknown Title',
+            author:      [...c.matchAll(/href="\/autor\/[^"]+"[^>]*>([^<]+)<\/a>/g)].map(a => strip(a[1])).join(', '),
+            series:      series ? `${strip(series[1])} ${series[2]}` : '',
+            year:        '',
+            format:      'epub',
+            filesize:    0,
+            language:    'es',
+            source:      'Lectulandia',
+            downloadUrl: LECTULANDIA + m[1],
+            pageUrl:     LECTULANDIA + m[1],
+            coverUrl:    (c.match(/<img class="cover" src="(https:\/\/assets\.lectulandia\.com\/[^"]+)"/) || [])[1] || '',
+        });
+    }
+    return out;
+}
+// The "Autores:" list a search shows: [name, path].
+export const lectulandiaAuthors = html => [...String(html || '').matchAll(/<a class="term" href="(\/autor\/[^"]+\/)">([^<]+)<\/a>/g)].map(m => [strip(m[2]), m[1]]);
+// The EPUB's antupload page from a book page (PDF when there is no EPUB).
+export function lectulandiaFileUrl(html) {
+    const links = [...String(html || '').matchAll(/href="\/download\.php\?t=(\d)&(?:amp;)?d=([A-Za-z0-9+/=]+)/g)];
+    const pick = links.find(l => l[1] === '1') || links.find(l => l[1] === '2'); // 1 EPUB, 2 PDF
+    if (!pick) return null;
+    const code = Buffer.from(pick[2], 'base64').toString('latin1').replace(/\/+$/, '');
+    return /^[A-Za-z0-9]{4,20}$/.test(code) ? { url: `https://www.antupload.com/file/${code}`, format: pick[1] === '1' ? 'epub' : 'pdf' } : null;
+}
+
+async function searchLectulandia(query, mode) {
+    if (mode === 'audiobooks') return [];
+    try {
+        const res = await get(`${LECTULANDIA}/?s=${encodeURIComponent(query)}`, 8000);
+        if (!res.ok) return [];
+        const html = await res.text();
+        const out = parseLectulandia(html);
+        // At most two author pages, for names that share a word with the search.
+        const words = fold(query).split(/\s+/).filter(w => w.length > 2);
+        const authors = lectulandiaAuthors(html).filter(([name]) => words.some(w => fold(name).split(/\s+/).includes(w))).slice(0, 2);
+        const pages = await Promise.all(authors.map(([, p]) => get(LECTULANDIA + p, 8000).then(r => r.ok ? r.text() : '', () => '')));
+        for (const r of pages.flatMap(parseLectulandia)) if (!out.some(x => x.pageUrl === r.pageUrl)) out.push(r);
+        return out.slice(0, 15);
+    } catch(e) { return []; }
+}
+
+async function resolveLectulandia(r) {
+    if (!r.pageUrl || !r.pageUrl.startsWith(LECTULANDIA + '/book/')) return;
+    try {
+        const res = await get(r.pageUrl, 8000);
+        if (!res.ok) return;
+        const f = lectulandiaFileUrl(await res.text());
+        if (f) { r.directUrl = f.url; r.format = f.format; }
+    } catch(e) { /* no file link: the result keeps its page link */ }
+}
+
+// What to fetch for a file link. antupload's file page sets a session cookie and links the file, which is
+// only handed over with that cookie and the page as referrer. Other links are fetched as they are.
+export async function fileRequest(url) {
+    const m = String(url).match(/^https?:\/\/(?:www\.)?antupload\.com\/file\/([A-Za-z0-9]+)\/?$/);
+    if (!m) return { url, headers: {} };
+    const page = `https://www.antupload.com/file/${m[1]}/`;
+    const res = await get(page, 15000);
+    const href = (String(await res.text()).match(/href="(\/filed\/[A-Za-z0-9]+\/[^"]*)"/) || [])[1];
+    const cookie = res.headers.getSetCookie().map(c => c.split(';')[0]).join('; ');
+    if (!res.ok || !href) throw new Error('Stale link: the file is no longer on antupload');
+    return { url: 'https://www.antupload.com' + href.replace(/&amp;/g, '&'), headers: { Referer: page, ...(cookie ? { Cookie: cookie } : {}) } };
+}
+
 // ── OpenStax ──────────────────────────────────────────────────────────────────
 // A small list (about 130 titles) of English textbooks. There is no search endpoint, but the whole list is
 // one request, so titles are matched locally. Each match needs one more request to its detail page for
@@ -1853,6 +1931,9 @@ export const SOURCES = [
     { id: 'ebookelo', name: 'Ebookelo', source: 'Ebookelo', kinds: ['ebooks'], info: 'eBooks, mostly Spanish · magnet links', colour: '#D68FE0',
         search: (q, mode) => searchEbookelo(q, mode),
         resolveOne: r => resolveEbookeloMagnet(r) },
+    { id: 'lectulandia', name: 'Lectulandia', source: 'Lectulandia', kinds: ['ebooks'], info: 'eBooks in Spanish · EPUB', colour: '#7FB3E0',
+        search: (q, mode) => searchLectulandia(q, mode),
+        resolveOne: r => resolveLectulandia(r) },
     { id: 'openstax', name: 'OpenStax', source: 'OpenStax', kinds: ['ebooks'], info: 'Free textbooks', colour: '#B7A4FF',
         search: (q, mode) => searchOpenStax(q, mode) },
     { id: 'libretexts', name: 'LibreTexts', source: 'LibreTexts', kinds: ['ebooks'], info: 'Free textbooks and course pages', colour: '#A8F0FF',

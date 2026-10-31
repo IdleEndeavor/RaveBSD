@@ -54,6 +54,7 @@ Click any screenshot to see it full size.
 | Standard Ebooks | Carefully produced public-domain EPUBs, in English |
 | Libronera | Spanish eBooks. Search only: downloads need a password the site shows on each book's page, so results open that page |
 | Ebookelo | Mostly Spanish eBooks, as magnet links sent to qBittorrent or copied |
+| Lectulandia | Spanish eBooks as EPUB, downloaded through antupload.com |
 | Wikisource | English Wikisource's public-domain texts, made into an EPUB when you download one |
 | OpenStax | |
 | LibreTexts | |
