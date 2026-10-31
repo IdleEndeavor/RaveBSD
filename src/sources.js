@@ -1700,9 +1700,9 @@ const keepResult = (r, o) =>
     && (!o.yearFrom || !(parseInt(r.year) > 0) || (parseInt(r.year) >= o.yearFrom && parseInt(r.year) <= o.yearTo))
     && (!o.lang || !r.language || langOf(r.language) === langOf(o.lang));
 // Sources say a language as "English", "en" or "eng"; all of them mean the same here.
-const LANGS = { en: 'english|eng', es: 'spanish|spa|español|espanol', fr: 'french|fra|fre|français|francais', de: 'german|deu|ger|deutsch',
+export const LANGS = { en: 'english|eng', es: 'spanish|spa|español|espanol', fr: 'french|fra|fre|français|francais', de: 'german|deu|ger|deutsch',
     it: 'italian|ita|italiano', pt: 'portuguese|por|português|portugues', ru: 'russian|rus|русский', ja: 'japanese|jpn|日本語', zh: 'chinese|zho|chi|中文', nl: 'dutch|nld|dut', pl: 'polish|pol' };
-const langOf = l => { const s = String(l).trim().toLowerCase(); for (const [k, v] of Object.entries(LANGS)) if (s === k || s.startsWith(k + '-') || v.split('|').includes(s)) return k; return s; };
+export const langOf = l => { const s = String(l).trim().toLowerCase(); for (const [k, v] of Object.entries(LANGS)) if (s === k || s.startsWith(k + '-') || v.split('|').includes(s)) return k; return s; };
 
 export function parseOpts(url) {
     const list = k => (url.searchParams.get(k) || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
