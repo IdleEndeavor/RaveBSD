@@ -21,10 +21,9 @@
 //   2. A result has: title, author, year, format, filesize (bytes), language, source (display name),
 //      downloadUrl, coverUrl. Optional: directUrl (a real file link), pageUrl (the source's own page, when
 //      downloadUrl is the file itself), magnet, infoHash, md5.
-//   3. If the real file link needs another request, add a case to resolveOne() so the page can fetch it later.
-//   4. Add it to runFullSearch() and its meta counts, to LIBRARIES in src/server.js (name and which searches it
-//      answers), to LIBS in public/js/search.js (loading bar label) and SRC_INFO in public/js/settings.js.
-//      If its file links come later, add its display name to RESOLVABLE. Add a test for any parsing you wrote.
+//   3. Add one entry to SOURCES (see "Source registry"): its search, and resolve/resolveOne if its real file
+//      links need another request. Searches, counts, /search/<id>, /resolve, the admin panel and the page's
+//      labels all read it. Add a test for any parsing you wrote.
 // Search results never leave this server as links to fetch: downloads go by result id (src/jobs.js).
 
 import { browserGet, browserFetch, browserAvailable, verifyWindowOpen } from './browser.js';
@@ -901,6 +900,181 @@ async function searchGutenberg(query, mode) {
     } catch(e) { return []; }
 }
 
+// ── Standard Ebooks ─────────────────────────────────────────────────────────
+// Carefully produced public-domain ebooks, all in English. The search page gives each book's address
+// (/ebooks/<author>/<title>[/<translator>]) and the EPUB's name follows from it. Without ?source=download
+// the file link answers with a thank-you page instead of the file.
+export function parseStandardEbooks(html) {
+    const out = [];
+    for (const li of String(html || '').split('<li typeof="schema:Book"').slice(1)) {
+        const book = (li.match(/^\s*about="(\/ebooks\/[^"?#]+)"/) || [])[1];
+        // Books not yet in the public domain are listed as placeholders with no files.
+        if (!book || /^[^>]*\bnot-pd\b/.test(li)) continue;
+        const title = strip((li.match(/<span property="schema:name">([\s\S]*?)<\/span>/) || [])[1]);
+        const authors = [...li.matchAll(/property="schema:author"[\s\S]*?<span property="schema:name">([\s\S]*?)<\/span>/g)].map(m => strip(m[1]));
+        const name = book.split('/').slice(2).map(s => s.replace(/_/g, '-')).join('_');
+        const file = `https://standardebooks.org${book}/downloads/${name}.epub?source=download`;
+        const cover = (li.match(/<img src="(\/images\/covers\/[^"]+)"/) || [])[1];
+        out.push({
+            title:       title || 'Unknown Title',
+            author:      authors.join(', '),
+            year:        '',
+            format:      'epub',
+            filesize:    0,
+            language:    'en',
+            source:      'Standard Ebooks',
+            downloadUrl: file,
+            directUrl:   file,
+            pageUrl:     'https://standardebooks.org' + book,
+            coverUrl:    cover ? 'https://standardebooks.org' + cover : '',
+        });
+    }
+    return out;
+}
+
+async function searchStandardEbooks(query, mode) {
+    if (mode === 'audiobooks') return [];
+    try {
+        const res = await get(`https://standardebooks.org/ebooks?query=${encodeURIComponent(query)}&per-page=12`, 8000);
+        if (!res.ok) return [];
+        return parseStandardEbooks(await res.text()).slice(0, 10);
+    } catch(e) { return []; }
+}
+
+// ── Wikisource ──────────────────────────────────────────────────────────────
+// Public-domain texts transcribed by volunteers (English Wikisource). Its search mostly finds chapters
+// (Title/Chapter 5) and "versions" lists, so only top-level pages with a {{header}} count, and their wikitext
+// gives the author and year: one search, then one request for every candidate's wikitext. Wikisource's export
+// service builds the EPUB when it is downloaded, in a few seconds.
+const WIKISOURCE_API = 'https://en.wikisource.org/w/api.php';
+const wikiText = s => String(s || '').replace(/\[\[(?:[^|\]]*\|)?([^\]]*)\]\]/g, '$1').replace(/\{\{[^{}]*\}\}/g, '').replace(/<[^>]+>/g, '').replace(/'{2,}/g, '').trim().replace(/[\s,;:]+$/, '');
+
+// pages: the API's query.pages (formatversion=2, with each page's wikitext).
+export function parseWikisourcePages(pages) {
+    const out = [];
+    for (const p of pages || []) {
+        const text = (p && p.revisions && p.revisions[0] && p.revisions[0].slots && p.revisions[0].slots.main && p.revisions[0].slots.main.content) || '';
+        if (!p.title || p.title.includes('/') || !/\{\{\s*header\s*\|/i.test(text) || /\{\{\s*(versions|disambiguation|translations)\b/i.test(text)) continue;
+        // A value runs to the next | or line end, links and templates included ([[Author:X|X]]).
+        const param = name => wikiText((text.match(new RegExp(`\\|\\s*${name}\\s*=((?:\\[\\[[^\\]]*\\]\\]|\\{\\{[^{}]*\\}\\}|[^|\\n])*)`, 'i')) || [])[1]);
+        const page = p.title.replace(/ /g, '_');
+        out.push({
+            title:       param('title') || p.title,
+            author:      param('author') || param('override_author'),
+            year:        (param('year').match(/\d{3,4}/) || [''])[0],
+            format:      'epub',
+            filesize:    0,
+            language:    'en',
+            source:      'Wikisource',
+            downloadUrl: `https://ws-export.wmcloud.org/?format=epub&lang=en&page=${encodeURIComponent(page)}`,
+            directUrl:   `https://ws-export.wmcloud.org/?format=epub&lang=en&page=${encodeURIComponent(page)}`,
+            pageUrl:     `https://en.wikisource.org/wiki/${encodeURIComponent(page)}`,
+            coverUrl:    '',
+        });
+    }
+    return out;
+}
+
+async function searchWikisource(query, mode) {
+    if (mode === 'audiobooks') return [];
+    // Wikimedia asks automated clients to say who they are.
+    const headers = { 'User-Agent': RAVE_UA, 'Accept': 'application/json' };
+    try {
+        const found = await get(`${WIKISOURCE_API}?action=query&list=search&srsearch=${encodeURIComponent(query)}&srnamespace=0&srlimit=30&format=json&formatversion=2`, 6000, headers);
+        if (!found.ok) return [];
+        const titles = (((await found.json()).query || {}).search || []).map(s => s.title).filter(t => !t.includes('/')).slice(0, 12);
+        if (!titles.length) return [];
+        const res = await get(`${WIKISOURCE_API}?action=query&prop=revisions&rvprop=content&rvslots=main&titles=${encodeURIComponent(titles.join('|'))}&format=json&formatversion=2`, 8000, headers);
+        if (!res.ok) return [];
+        // The API answers in its own order; keep the search's.
+        const pages = (((await res.json()).query || {}).pages || []).sort((a, b) => titles.indexOf(a.title) - titles.indexOf(b.title));
+        return parseWikisourcePages(pages).slice(0, 10);
+    } catch(e) { return []; }
+}
+
+// ── Libronera ───────────────────────────────────────────────────────────────
+// Spanish ebooks (Epubera's library). Search only: the file links sit behind a password the site shows to
+// people on each book's page, so results link to that page and the download happens there.
+export function parseLibronera(html) {
+    const out = [];
+    for (const a of String(html || '').split('<article ').slice(1)) {
+        const page = (a.match(/<a class="row-thumb" href="(https:\/\/libronera\.com\/[^"]+)"/) || [])[1];
+        const alt = strip((a.match(/<img[^>]*\salt="([^"]*)"/) || [])[1]);
+        if (!page || !alt) continue;
+        const [title, author = ''] = alt.split(' | ');
+        const cover = (a.match(/data-src="(https:\/\/libronera\.com\/wp-content\/[^"]+)"/) || [])[1] || '';
+        out.push({
+            title, author, year: '', format: 'epub', filesize: 0, language: 'es', source: 'Libronera',
+            downloadUrl: page, pageUrl: page, coverUrl: cover,
+        });
+    }
+    return out;
+}
+
+async function searchLibronera(query, mode) {
+    if (mode === 'audiobooks') return [];
+    try {
+        const res = await get(`https://libronera.com/?s=${encodeURIComponent(query)}`, 8000);
+        if (!res.ok) return [];
+        return parseLibronera(await res.text()).slice(0, 10);
+    } catch(e) { return []; }
+}
+
+// ── Ebookelo ────────────────────────────────────────────────────────────────
+// Mostly Spanish ebooks (an ePubLibre mirror), shared as torrents. The search lists books; each book's
+// magnet is on its download page, found when the page asks for it (/resolve), as with AudiobookBay.
+const EBOOKELO = 'https://ww3.ebookelo.com';
+const EBOOKELO_LANG = { espa: 'es', ingl: 'en', fran: 'fr', alem: 'de', ital: 'it', port: 'pt', cata: 'ca' };
+export function parseEbookelo(html) {
+    const out = [];
+    for (const c of String(html || '').split('<div class="bookCard">').slice(1)) {
+        const m = c.match(/<a href="\/ebook\/(\d+)\/([^"]+)"/);
+        if (!m) continue;
+        const page = `${EBOOKELO}/ebook/${m[1]}/${m[2]}`;
+        out.push({
+            title:       strip((c.match(/<h3 class="title">([\s\S]*?)<\/h3>/) || [])[1]) || 'Unknown Title',
+            author:      strip((c.match(/<span class="autor">([\s\S]*?)<\/span>/) || [])[1]),
+            year:        '',
+            format:      'epub',
+            filesize:    0,
+            language:    EBOOKELO_LANG[(c.match(/<span class="flag (\w+)"/) || [])[1]] || '',
+            source:      'Ebookelo',
+            downloadUrl: page,
+            detailUrl:   `${EBOOKELO}/download/${m[1]}/magnet`,
+            pageUrl:     page,
+            coverUrl:    `${EBOOKELO}/images/cover/t/${m[1]}.jpg`,
+        });
+    }
+    return out;
+}
+// The download page's form holds the magnet the countdown would send.
+export const ebookeloMagnet = html => {
+    const v = (String(html || '').match(/name="magnet" value="(magnet:\?[^"]+)"/) || [])[1];
+    return v ? v.replace(/&amp;/g, '&') : '';
+};
+
+async function searchEbookelo(query, mode) {
+    if (mode === 'audiobooks') return [];
+    try {
+        // An empty search answers 404.
+        const res = await get(`${EBOOKELO}/search/${encodeURIComponent(query)}/page/1`, 8000);
+        if (!res.ok) return [];
+        return parseEbookelo(await res.text()).slice(0, 10);
+    } catch(e) { return []; }
+}
+
+async function resolveEbookeloMagnet(r) {
+    if (!r.detailUrl || !r.detailUrl.startsWith(EBOOKELO + '/download/')) return;
+    try {
+        const res = await get(r.detailUrl, 8000);
+        if (!res.ok) return;
+        const magnet = ebookeloMagnet(await res.text());
+        if (!magnet) return;
+        r.magnet = magnet;
+        r.infoHash = ((magnet.match(/btih:([a-f0-9]{40})/i) || [])[1] || '').toLowerCase();
+    } catch(e) { /* no magnet: the result keeps its page link */ }
+}
+
 // ── OpenStax ──────────────────────────────────────────────────────────────────
 // A small list (about 130 titles) of English textbooks. There is no search endpoint, but the whole list is
 // one request, so titles are matched locally. Each match needs one more request to its detail page for
@@ -1637,6 +1811,93 @@ async function searchMobilism(query, mode) {
     } catch (e) { return unavailable(); }
 }
 
+// ── Source registry ─────────────────────────────────────────────────────────
+// Every library, once. Searches, counts, per-source routes, /resolve, the admin panel's list and the page's
+// labels all come from here.
+//   id          route (/search/<id>), settings key (sources.off) and meta key
+//   name        as the page shows it; source: the `source` field its results carry
+//   kinds       the searches it answers; applies(): false while it needs setting up (a login)
+//   info, colour  what it has, for the admin panel's list
+//   search(q, mode)        its results
+//   resolve(rs, mode, n)   direct links for the first n results, filled in place (may return the ones to keep)
+//   resolveOne(r, mode)    the direct link for one result, when the page asks (/resolve)
+//   map(rs)                turns its raw results into results, after resolve
+export const SOURCES = [
+    { id: 'libgen', name: 'LibGen', source: 'Library Genesis', kinds: ['ebooks', 'audiobooks'], info: 'eBooks · mirrors tried in order', colour: '#FF8A65',
+        // LibGen has no audiobook section: in audiobook mode only actual audio files it happens to hold count.
+        search: (q, mode) => searchLibgen(q, mode).then(rs => mode === 'audiobooks' ? rs.filter(r => IA_AUDIO_EXTS.includes(String(r.format).toLowerCase())) : rs),
+        resolve: (rs, mode, n) => resolveLibgenLinks(rs, n),
+        resolveOne: r => r.md5 && resolveLibgenLinks([r], 1) },
+    { id: 'annas', name: "Anna's Archive", source: "Anna's Archive", kinds: ['ebooks'],
+        // Its `ext` filter has no audio values, so an audiobook search would only return ebooks.
+        search: async (q, mode) => (mode === 'audiobooks' ? [] : searchAnnas(q, mode)),
+        // Most Anna's files are also on LibGen, which has instant links.
+        resolveOne: async r => {
+            if (!r.md5) return;
+            const t = { md5: r.md5 };
+            await resolveLibgenLinks([t], 1);
+            if (t.directUrl) { r.directUrl = t.directUrl; r.directFrom = 'LibGen'; }
+        } },
+    { id: 'archive', name: 'Internet Archive', source: 'Internet Archive', kinds: ['ebooks', 'audiobooks'], info: 'eBooks and audiobooks · lending items left out', colour: '#8FD0FF',
+        search: (q, mode) => searchArchive(q, mode),
+        resolve: (rs, mode, n) => resolveArchiveLinks(rs, mode, n),
+        resolveOne: (r, mode) => resolveArchiveLinks([r], mode, 1) },
+    { id: 'gutenberg', name: 'Project Gutenberg', source: 'Project Gutenberg', kinds: ['ebooks'], info: 'eBooks · public domain', colour: '#FFD54A',
+        search: (q, mode) => searchGutenberg(q, mode) },
+    { id: 'standardebooks', name: 'Standard Ebooks', source: 'Standard Ebooks', kinds: ['ebooks'], info: 'eBooks · public domain, carefully produced', colour: '#5EEAB4',
+        search: (q, mode) => searchStandardEbooks(q, mode) },
+    { id: 'wikisource', name: 'Wikisource', source: 'Wikisource', kinds: ['ebooks'], info: 'eBooks · public-domain texts, made on request', colour: '#C9C5F2',
+        search: (q, mode) => searchWikisource(q, mode) },
+    { id: 'libronera', name: 'Libronera', source: 'Libronera', kinds: ['ebooks'], info: 'eBooks in Spanish · source pages only', colour: '#FFB4A2',
+        search: (q, mode) => searchLibronera(q, mode) },
+    { id: 'ebookelo', name: 'Ebookelo', source: 'Ebookelo', kinds: ['ebooks'], info: 'eBooks, mostly Spanish · magnet links', colour: '#D68FE0',
+        search: (q, mode) => searchEbookelo(q, mode),
+        resolveOne: r => resolveEbookeloMagnet(r) },
+    { id: 'openstax', name: 'OpenStax', source: 'OpenStax', kinds: ['ebooks'], info: 'Free textbooks', colour: '#B7A4FF',
+        search: (q, mode) => searchOpenStax(q, mode) },
+    { id: 'libretexts', name: 'LibreTexts', source: 'LibreTexts', kinds: ['ebooks'], info: 'Free textbooks and course pages', colour: '#A8F0FF',
+        search: (q, mode) => searchLibreTexts(q, mode) },
+    { id: 'memoryoftheworld', name: 'Memory of the World', source: 'Memory of the World', kinds: ['ebooks'], info: 'eBooks', colour: '#FF9FE8',
+        search: (q, mode) => searchMemoryOfTheWorld(q, mode) },
+    { id: 'royallib', name: 'RoyalLib', source: 'RoyalLib', kinds: ['ebooks'], info: 'eBooks', colour: '#FFC070',
+        search: (q, mode) => searchRoyalLib(q, mode),
+        resolve: (rs, mode, n) => resolveRoyalLibLinks(rs, n),
+        resolveOne: r => resolveRoyalLibLinks([r], 1) },
+    { id: 'zlibrary', name: 'Z-Library', source: 'Z-Library', kinds: ['ebooks'],
+        search: (q, mode) => searchZlibrary(q, mode) },
+    { id: 'mobilism', name: 'Mobilism', source: 'Mobilism', kinds: ['ebooks', 'audiobooks'], applies: () => mobilismConfigured(),
+        search: (q, mode) => searchMobilism(q, mode) },
+    { id: 'audiobookbay', name: 'AudiobookBay', source: 'AudiobookBay', kinds: ['audiobooks'], info: 'Audiobooks · magnet links', colour: '#2EE6F6',
+        search: q => searchAudiobookBay(q),
+        // Fills in the raw results' magnets; returns only those that got one.
+        resolve: rs => resolveAbbMagnets(rs),
+        map: rs => mapAbbResults(rs),
+        resolveOne: async r => {
+            const raw = { ...r, detailUrl: r.detailUrl || r.downloadUrl };
+            await resolveAbbMagnets([raw], 1);
+            if (raw.magnet) { r.magnet = raw.magnet; r.infoHash = raw.infoHash; }
+        } },
+    { id: 'librivox', name: 'LibriVox', source: 'LibriVox', kinds: ['audiobooks'], info: 'Audiobooks · volunteer recordings', colour: '#FFB4A2',
+        search: (q, mode) => searchLibriVox(q, mode) },
+    { id: 'audiobooksbee', name: 'AudiobooksBee', source: 'AudiobooksBee', kinds: ['audiobooks'], info: 'Audiobooks · download pages', colour: '#8FD0FF',
+        search: q => searchAudiobooksBee(q),
+        resolve: rs => resolveAudiobooksBeeLinks(rs),
+        map: rs => mapAudiobooksBeeResults(rs),
+        resolveOne: async r => {
+            const raw = { ...r, detailUrl: r.detailUrl };
+            if (!raw.detailUrl) return;
+            await resolveAudiobooksBeeLinks([raw], 1);
+            if (raw.downloadUrl) { r.downloadUrl = raw.downloadUrl; if (raw.format) r.format = raw.format; }
+        } },
+];
+const sourceById = id => SOURCES.find(s => s.id === id);
+// One source's search as /search/<id> answers it: its own results, with the first few direct links.
+async function searchOne(src, query, mode) {
+    let results = await src.search(query, mode);
+    if (src.resolve && results.length) { const kept = await src.resolve(results, mode); if (Array.isArray(kept)) results = kept; }
+    return src.map ? src.map(results) : results;
+}
+
 // ── Merge, rank, deduplicate ────────────────────────────────────────────────
 
 // Result ids and the server-side store let the page ask for one result's direct link later
@@ -1653,10 +1914,10 @@ export const setSourcesOff = list => { sourcesOff = new Set(list || []); };
 // While the VPN tunnel is down (and Settings say to stop), searches answer with this message instead.
 let searchBlocked = () => '';
 export const setSearchGate = fn => { searchBlocked = fn; };
-// Sources whose real file link is found later through /resolve.
 // How each source did in its most recent search: ok, unavailable, error or timeout. Shown in Settings.
 export const sourceHealth = {};
-export const RESOLVABLE = new Set(['Library Genesis', "Anna's Archive", 'RoyalLib', 'Internet Archive', 'AudiobookBay', 'AudiobooksBee']);
+// Sources whose real file link is found later through /resolve.
+export const RESOLVABLE = new Set(SOURCES.filter(s => s.resolveOne).map(s => s.source));
 let idSeq = 0;
 export const registerResult = (r, mode) => {
     // Links from a library's page or API become the page's links and the server's downloads: web addresses only.
@@ -1760,26 +2021,8 @@ export async function resolveOne(id) {
     if (r.directUrl || r.magnet) return decorate(r); // fresh shelf marks, job and naming, not the search's
     if (!resolving.has(id)) {
         resolving.set(id, (async () => {
-            const mode = r._mode || 'ebooks';
-            switch (r.source) {
-                case 'Library Genesis': if (r.md5) await resolveLibgenLinks([r], 1); break;
-                case "Anna's Archive": // most Anna's files are also on LibGen, which has instant links
-                    if (r.md5) { const t = { md5: r.md5 }; await resolveLibgenLinks([t], 1); if (t.directUrl) { r.directUrl = t.directUrl; r.directFrom = 'LibGen'; } }
-                    break;
-                case 'RoyalLib': await resolveRoyalLibLinks([r], 1); break;
-                case 'Internet Archive': await resolveArchiveLinks([r], mode, 1); break;
-                case 'AudiobookBay': {
-                    const raw = { ...r, detailUrl: r.detailUrl || r.downloadUrl };
-                    await resolveAbbMagnets([raw], 1);
-                    if (raw.magnet) { r.magnet = raw.magnet; r.infoHash = raw.infoHash; }
-                    break;
-                }
-                case 'AudiobooksBee': {
-                    const raw = { ...r, detailUrl: r.detailUrl };
-                    if (raw.detailUrl) { await resolveAudiobooksBeeLinks([raw], 1); if (raw.downloadUrl) { r.downloadUrl = raw.downloadUrl; if (raw.format) r.format = raw.format; } }
-                    break;
-                }
-            }
+            const src = SOURCES.find(s => s.source === r.source);
+            if (src && src.resolveOne) await src.resolveOne(r, r._mode || 'ebooks');
             resolving.delete(id);
         })().catch(() => resolving.delete(id)));
     }
@@ -1801,38 +2044,23 @@ async function runFullSearch(query, mode, resolveTopN, env, onProgress, opts) {
     // Each source is a named job, so adding or skipping one never shifts positions.
     // With advanced search the user can pick sources, and unchosen ones never run.
     const jobs = [];
-    const add = (name, applies, run) => { if (applies && !sourcesOff.has(name) && (!opts.sources.length || opts.sources.includes(name))) jobs.push({ name, fn: run, run: run(query) }); };
-    const ebooks = mode !== 'audiobooks', audio = !ebooks;
-    // LibGen has no audiobook section: in audiobook mode only actual audio files it happens to hold count.
-    add('libgen', true, q => searchLibgen(q, mode).then(rs => audio ? rs.filter(r => IA_AUDIO_EXTS.includes(String(r.format).toLowerCase())) : rs));
-    add('annas', ebooks, q => searchAnnas(q, mode));
-    add('archive', true, q => searchArchive(q, mode));
-    add('gutenberg', ebooks, q => searchGutenberg(q, mode));
-    add('openstax', ebooks, q => searchOpenStax(q, mode));
-    add('libretexts', ebooks, q => searchLibreTexts(q, mode));
-    add('memoryoftheworld', ebooks, q => searchMemoryOfTheWorld(q, mode));
-    add('royallib', ebooks, q => searchRoyalLib(q, mode));
-    add('zlibrary', ebooks, q => searchZlibrary(q, mode));
-    add('mobilism', mobilismConfigured(), q => searchMobilism(q, mode));
-    add('audiobookbay', audio, q => searchAudiobookBay(q));
-    add('librivox', audio, q => searchLibriVox(q, mode));
-    add('audiobooksbee', audio, q => searchAudiobooksBee(q));
+    for (const s of SOURCES) {
+        if (!s.kinds.includes(mode) || (s.applies && !s.applies()) || sourcesOff.has(s.id) || (opts.sources.length && !opts.sources.includes(s.id))) continue;
+        const fn = q => s.search(q, mode);
+        jobs.push({ name: s.id, fn, run: fn(query) });
+    }
 
     // Streaming callers (the page) get results as each source finishes and ask for direct links
     // afterwards through /resolve. Plain callers (the JSON API) wait for direct links before the reply.
     const streaming = !!onProgress;
-    const norm = (name, v) => name === 'audiobookbay' ? mapAbbResults(v) : name === 'audiobooksbee' ? mapAudiobooksBeeResults(v) : v;
+    const norm = (name, v) => { const s = sourceById(name); return s && s.map ? s.map(v) : v; };
     const got = {};
     let finished = false;
     const snapshot = () => mergeAndRank([].concat(...Object.values(got).map(v => v.slice())), query, mode, opts);
     // Plain callers: a source's direct links are looked up as soon as its own search answers, so they no longer
     // wait for the slowest library. resolveAbbMagnets fills in the raw AudiobookBay objects before norm().
-    const RESOLVERS = {
-        libgen: rs => resolveLibgenLinks(rs, resolveTopN), royallib: rs => resolveRoyalLibLinks(rs, resolveTopN),
-        archive: rs => resolveArchiveLinks(rs, mode, resolveTopN), audiobookbay: rs => resolveAbbMagnets(rs), audiobooksbee: rs => resolveAudiobooksBeeLinks(rs),
-    };
     const resolveJobs = [];
-    const resolveSoon = (name, v) => { if (!streaming && v.length && RESOLVERS[name]) resolveJobs.push(RESOLVERS[name](v).catch(() => {})); };
+    const resolveSoon = (name, v) => { const s = sourceById(name); if (!streaming && v.length && s && s.resolve) resolveJobs.push(s.resolve(v, mode, resolveTopN).catch(() => {})); };
 
     if (onProgress) onProgress({ sources: jobs.map(j => j.name) });
     const settled = await Promise.allSettled(jobs.map(j => {
@@ -1865,12 +2093,7 @@ async function runFullSearch(query, mode, resolveTopN, env, onProgress, opts) {
         }).catch(() => {})));
     }
     const count = n => (byName[n] || []).length;
-    const meta = () => ({
-        libgen: count('libgen'), annas: count('annas'), archive: count('archive'), gutenberg: count('gutenberg'),
-        openstax: count('openstax'), libretexts: count('libretexts'), memoryoftheworld: count('memoryoftheworld'),
-        royallib: count('royallib'), audiobookbay: count('audiobookbay'), librivox: count('librivox'),
-        audiobooksbee: count('audiobooksbee'), zlibrary: count('zlibrary'), mobilism: count('mobilism'),
-    });
+    const meta = () => Object.fromEntries(SOURCES.map(s => [s.id, count(s.id)]));
 
     if (streaming) {
         finished = true;
@@ -1939,65 +2162,8 @@ export default {
         if (blocked) return err(blocked, 503);
 
         try {
-            if (path === '/search/libgen') {
-                let results = await searchLibgen(query, mode);
-                // Only the first few results get a direct link here (resolveLibgenLinks' default).
-                // Resolving every result at once sent bursts of requests and made searches hang.
-                if (results.length > 0) await resolveLibgenLinks(results);
-                return okR(env, 'libgen', results);
-            }
-            if (path === '/search/royallib') {
-                let results = await searchRoyalLib(query, mode);
-                if (results.length > 0) await resolveRoyalLibLinks(results);
-                return okR(env, 'royallib', results);
-            }
-            // Anna's `ext` filter has no audio values, so an audiobook search would only return ebooks.
-            // Skip Anna's in audiobook mode.
-            if (path === '/search/annas') {
-                if (mode === 'audiobooks') return okR(env, 'annas', []);
-                return okR(env, 'annas', await searchAnnas(query, mode));
-            }
-
-            if (path === '/search/archive') {
-                let results = await searchArchive(query, mode);
-                if (results.length > 0) await resolveArchiveLinks(results, mode);
-                return okR(env, 'archive', results);
-            }
-
-            if (path === '/search/audiobookbay') {
-                let results = await searchAudiobookBay(query);
-                results = await resolveAbbMagnets(results);
-                return okR(env, 'audiobookbay', mapAbbResults(results));
-            }
-
-            if (path === '/search/gutenberg') {
-                return okR(env, 'gutenberg', await searchGutenberg(query, mode));
-            }
-
-            if (path === '/search/openstax') {
-                return okR(env, 'openstax', await searchOpenStax(query, mode));
-            }
-
-            if (path === '/search/libretexts') {
-                return okR(env, 'libretexts', await searchLibreTexts(query, mode));
-            }
-
-            if (path === '/search/memoryoftheworld') {
-                return okR(env, 'memoryoftheworld', await searchMemoryOfTheWorld(query, mode));
-            }
-
-            if (path === '/search/librivox') {
-                return okR(env, 'librivox', await searchLibriVox(query, mode));
-            }
-
-            if (path === '/search/audiobooksbee') {
-                let results = await searchAudiobooksBee(query);
-                results = await resolveAudiobooksBeeLinks(results);
-                return okR(env, 'audiobooksbee', mapAudiobooksBeeResults(results));
-            }
-
-            if (path === '/search/zlibrary') return okR(env, 'zlibrary', await searchZlibrary(query, mode));
-            if (path === '/search/mobilism') return okR(env, 'mobilism', await searchMobilism(query, mode));
+            const one = path.startsWith('/search/') && sourceById(path.slice(8));
+            if (one) return okR(env, one.id, await searchOne(one, query, mode));
 
             if (path === '/search/all') {
                 // stream=1 sends one JSON object per line: progress events, then a final {final: {...}} line
