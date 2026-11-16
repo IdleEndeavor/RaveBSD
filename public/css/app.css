@@ -78,6 +78,8 @@ img { display: block; }
 .tabbar { transition: transform .3s cubic-bezier(.22,.9,.24,1); }
 body.bar-away .tabbar { transform: translateY(calc(100% + 24px + env(safe-area-inset-bottom))); }
 body.bar-away .toast { bottom: calc(16px + env(safe-area-inset-bottom)); }
+/* While the phone Advanced search sheet is open the bar stays away, whatever the scroll handler in app.js does with bar-away (the keyboard opening, or scroll events near the top, bring it back over Clear and Search). */
+body:has(#adv.sheet:not([hidden])) .tabbar { transform: translateY(calc(100% + 24px + env(safe-area-inset-bottom))); visibility: hidden; pointer-events: none; }
 .tabbar a { position: relative; flex: 1; min-height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border-radius: 24px; color: var(--muted3); font-size: 11px; font-weight: 600; }
 .tabbar a.on { background: var(--paper); color: var(--ink); font-weight: 700; }
 .tabbar .nb { position: absolute; top: 4px; left: calc(50% + 6px); min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; font: 600 10px var(--mono); color: var(--ink); display: flex; align-items: center; justify-content: center; }
