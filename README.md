@@ -31,7 +31,7 @@ Click any screenshot to see it full size.
 ## What's new in 2.0
 
 - **A new look.** Results sit on a bookshelf (audiobooks as cassettes), or in a list. Works on phones as well as it does on desktops.
-- **Downloads to your server.** Press Download and the server fetches the book, renames it your way (for example `Frank Herbert/Dune (1965).epub`) and files it in your eBooks or audiobooks folder. Audiobooks arrive as a folder of numbered tracks with the cover alongside, or as one file when the book is a single M4B.
+- **Downloads to your server.** Press Download and the server fetches the book, renames it your way (for example `Frank Herbert/Dune (1965).epub`) and files it in your eBooks or audiobooks folder. Audiobooks arrive as a folder of numbered tracks with the cover alongside, or as one file in that same folder when the book is a single M4B.
 - **Your shelf.** Everything on the server in one place, ready to save to whichever device you are on. eBooks can save themselves automatically.
 - **Stats.** What you read most and what it costs in disk space. Counted on your server only.
 - **qBittorrent.** Audiobook magnets go straight to your qBittorrent, and finished torrents are renamed and shelved like everything else.

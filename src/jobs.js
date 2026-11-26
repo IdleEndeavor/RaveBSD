@@ -12,7 +12,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { EventEmitter, once } from 'node:events';
 import { DATA, settings, readJson, writeJson, setAside, cannotRead, countDownload, countSaved } from './config.js';
-import { applyTemplate, singleFileAudiobook, numberedPath, tidyName, safeSegment } from './rename.js';
+import { applyTemplate, singleFileAudiobook, audiobookPreview, numberedPath, tidyName, safeSegment } from './rename.js';
 import { getResult, resolveOne, zlibFileLink, freshLibgenLink, currentUA, RESOLVABLE } from './sources.js';
 import * as qbit from './qbit.js';
 import { vpnBlocks } from './vpn.js';
@@ -111,7 +111,7 @@ export function liveMarks(me, r) {
         onShelf: onShelfFor(me, { ...r, kind }),
         // Relative to the shelf folder: the folder itself is the admin's business (their page adds it).
         fileAs: kind === 'audiobook' && /\{track\}/.test(t)
-            ? singleFileAudiobook(t, bookOf(r)).replace(/\.[^.]*$/, '') + '/'
+            ? audiobookPreview(t, bookOf(r), { tidy: settings.shelves.tidy })
             : applyTemplate(t, bookOf(r), { tidy: settings.shelves.tidy }),
         jobId: job ? job.id : '',
     };
@@ -430,7 +430,7 @@ export async function fileIt(j, files, { copy = false, srcRoot = '' } = {}) {
         j.format = ext.toLowerCase();
         let rel;
         if (!rename) rel = safeSegment(settings.shelves.tidy ? tidyName(j.originalName || path.basename(pick)) : (j.originalName || path.basename(pick))) || j.id + '.' + j.format;
-        else rel = j.kind === 'audiobook' ? singleFileAudiobook(templateFor(j.kind), { ...book, ext: j.format })
+        else rel = j.kind === 'audiobook' ? singleFileAudiobook(templateFor(j.kind), { ...book, ext: j.format }, { tidy: settings.shelves.tidy })
             : applyTemplate(templateFor(j.kind), { ...book, ext: j.format }, { tidy: settings.shelves.tidy });
         let target = inside(dir, rel);
         if (taken(target)) {

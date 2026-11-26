@@ -1,6 +1,6 @@
 // Checks for the naming templates (src/rename.js). Run: node test/rename.test.mjs
 import assert from 'node:assert/strict';
-import { applyTemplate, tidyName, safeSegment, numberedPath, singleFileAudiobook, primaryAuthor, DEFAULT_TEMPLATES } from '../src/rename.js';
+import { applyTemplate, tidyName, safeSegment, numberedPath, singleFileAudiobook, audiobookPreview, primaryAuthor, DEFAULT_TEMPLATES } from '../src/rename.js';
 
 const dune = { author: 'Frank Herbert', title: 'Dune', year: '1965', ext: 'EPUB' };
 assert.equal(applyTemplate(DEFAULT_TEMPLATES.ebook, dune), 'Frank Herbert/Dune (1965).epub');
@@ -13,7 +13,16 @@ assert.equal(applyTemplate('{author}/{title}.{ext}', { title: '', author: '', ex
 const ab = { author: 'Frank Herbert', title: 'Dune', year: '1965', ext: 'mp3', track: 3, trackCount: 120 };
 assert.equal(applyTemplate(DEFAULT_TEMPLATES.audiobook, ab), 'Frank Herbert/Dune (1965)/003 - Dune.mp3');
 assert.equal(applyTemplate(DEFAULT_TEMPLATES.audiobook, { ...ab, trackCount: 9, track: 1 }), 'Frank Herbert/Dune (1965)/01 - Dune.mp3');
-assert.equal(singleFileAudiobook(DEFAULT_TEMPLATES.audiobook, { ...ab, ext: 'm4b' }), 'Frank Herbert/Dune (1965).m4b');
+// A single file goes in the book's folder too, without a track number.
+const one = { ...ab, ext: 'm4b' };
+assert.equal(singleFileAudiobook(DEFAULT_TEMPLATES.audiobook, one), 'Frank Herbert/Dune (1965)/Dune.m4b');
+assert.equal(singleFileAudiobook('{title} ({year})/{track} - {title}.{ext}', one), 'Dune (1965)/Dune.m4b');
+assert.equal(singleFileAudiobook('{title} ({year})/{track} - {title}.{ext}', { ...one, year: '' }), 'Dune/Dune.m4b');
+assert.equal(singleFileAudiobook('{title}/{track}.{ext}', one), 'Dune/Dune.m4b');
+assert.equal(singleFileAudiobook('{title}/Part {track}.{ext}', one), 'Dune/Dune.m4b');
+assert.equal(singleFileAudiobook('{author} - {title}.{ext}', one), 'Frank Herbert - Dune.m4b');
+assert.equal(audiobookPreview(DEFAULT_TEMPLATES.audiobook, one), 'Frank Herbert/Dune (1965)/');
+assert.equal(audiobookPreview('{title}.{ext}', one), 'Dune/');
 // Scraped values can never climb out of the folder or carry illegal characters.
 assert.equal(applyTemplate(DEFAULT_TEMPLATES.ebook, { author: '../../etc', title: 'a/b:c*?', ext: 'epub' }), 'etc/a-bc.epub');
 assert.equal(safeSegment('..'), '');
