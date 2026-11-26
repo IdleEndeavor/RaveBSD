@@ -91,15 +91,22 @@ export function applyTemplate(template, book, { tidy = true } = {}) {
     return segs.join('/');
 }
 
-// For a single-file audiobook (one M4B) the track folder is skipped: the last two segments of the
-// template become one file named after the folder.
-export function singleFileAudiobook(template, book) {
-    const t = String(template || DEFAULT_TEMPLATES.audiobook);
-    const parts = t.split('/');
-    const dirT = parts.length > 1 ? parts.slice(0, -1).join('/') : '{title}';
-    const dir = applyTemplate(dirT, book);
-    if (!dir) return applyTemplate('{title}.{ext}', book);
-    return dir + '.' + String(book.ext || '').toLowerCase().replace(/^\./, '');
+// A single-file audiobook (one M4B) is filed in the same folder its tracks would be, named by the last
+// segment of the template without a track number. A name that holds nothing else to tell books apart
+// ("{track}.{ext}") becomes the title.
+export function singleFileAudiobook(template, book, opts) {
+    const parts = String(template || DEFAULT_TEMPLATES.audiobook).split('/');
+    let name = parts.pop();
+    if (!/\{(author|title|series|year|narrator)\}/.test(name)) name = '{title}.{ext}';
+    return applyTemplate([...parts, name].join('/'), { ...book, track: '' }, opts);
+}
+
+// What the page shows before an audiobook arrives, when it may be one file or many: its folder, or the
+// file's name without the extension for a template that makes no folder.
+export function audiobookPreview(template, book, opts) {
+    const path = singleFileAudiobook(template, book, opts);
+    const slash = path.lastIndexOf('/');
+    return slash < 0 ? path.replace(/\.[^.]*$/, '') + '/' : path.slice(0, slash + 1);
 }
 
 // "Keep both" naming: "Dune (1965).epub" -> "Dune (1965) (2).epub", counting up until exists() says no.

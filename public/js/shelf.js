@@ -2,7 +2,7 @@
 import { $, $$, esc, api, icon, size, when, plural, toast, copy, saveToDevice, showMenu, closeMenu, confirmBox, anim, prefs,
     paletteFor, genCover, isPhone, priv, privPath, patchHtml } from './ui.js';
 import { app, bus, go, isAdmin, drawNav } from './app.js';
-import { applyTemplate, singleFileAudiobook } from './rename.js';
+import { applyTemplate, audiobookPreview } from './rename.js';
 
 let root, data = null, lowDrawn = false, picked = new Set(), selecting = false, qb = null, statsPeriod = 'all', onBus = [];
 
@@ -85,7 +85,7 @@ function steps(j) {
 const fileAsFor = j => {
     const s = app.settings.shelves, dir = (j.kind === 'audiobook' ? s.audioDir : s.ebookDir) || '';
     const b = { author: j.author, title: j.title, year: j.year, series: j.series, narrator: j.narrator, ext: j.format };
-    return (dir ? dir.replace(/\/+$/, '') + '/' : '') + (j.kind === 'audiobook' ? singleFileAudiobook(s.audioTemplate, b).replace(/\.[^.]*$/, '/') : applyTemplate(s.ebookTemplate, b, { tidy: s.tidy }));
+    return (dir ? dir.replace(/\/+$/, '') + '/' : '') + (j.kind === 'audiobook' ? audiobookPreview(s.audioTemplate, b, { tidy: s.tidy }) : applyTemplate(s.ebookTemplate, b, { tidy: s.tidy }));
 };
 // Phone: a compact card with a one-line status and the steps as words.
 function phoneJob(j, x, cover) {
